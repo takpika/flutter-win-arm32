@@ -1,0 +1,26 @@
+--- a/clang/lib/Sema/Sema.cpp
++++ b/clang/lib/Sema/Sema.cpp
+@@ -1579,6 +1579,23 @@
+           }
+         } else if (!FD->isTargetMultiVersion() ||
+                    FD->isTargetMultiVersionDefault()) {
++          // MSVC reports non-static anonymous-namespace functions with C5245,
++          // which is disabled at the regular warning levels. Keep C4505-like
++          // diagnostics for explicitly static functions and honor explicit
++          // Clang unused-function requests.
++          if (LangOpts.MSVCCompat &&
++              Context.getTargetInfo().getTriple().isOSWindows() &&
++              !isa<CXXMethodDecl>(DiagD) && FD->getStorageClass() != SC_Static &&
++              FD->isInAnonymousNamespace() &&
++              !llvm::any_of(Diags.getDiagnosticOptions().Warnings,
++                            [](llvm::StringRef Warning) {
++                              return Warning == "unused-function" ||
++                                     Warning == "unused" ||
++                                     Warning == "everything" ||
++                                     Warning == "error=unused-function" ||
++                                     Warning == "error=unused";
++                            }))
++            continue;
+           if (FD->getDescribedFunctionTemplate())
+             Diag(DiagD->getLocation(), diag::warn_unused_template)
+                 << /*function=*/0 << DiagD << DiagRange;

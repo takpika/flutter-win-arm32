@@ -18,6 +18,7 @@ import 'package:unified_analytics/unified_analytics.dart';
 
 import '../../src/common.dart';
 import '../../src/context.dart';
+import '../../src/fake_process_manager.dart';
 import '../../src/fakes.dart';
 import '../../src/package_config.dart';
 import '../../src/test_build_system.dart';
@@ -120,6 +121,56 @@ void main() {
       stdout: stdout,
     );
   }
+
+  testUsingContext(
+    'Windows ARM32 uses the installed SDK toolchain without Visual Studio',
+    () async {
+      setUpMockProjectFilesForBuild();
+      const toolchain = r'C:\flutter\bin\cache\artifacts\engine\windows-arm-release\toolchain';
+      fileSystem.file('$toolchain\\cross-build.json').createSync(recursive: true);
+      fileSystem
+          .file('$toolchain\\cross-build.json')
+          .writeAsStringSync(
+            '{"cmake":"cmake","toolchainRoot":"native","cppWinrtInclude":"include"}',
+          );
+      processManager = FakeProcessManager.list(<FakeCommand>[
+        FakeCommand(
+          command: const <String>[
+            'cmake',
+            '-S',
+            r'C:\windows',
+            '-B',
+            r'C:\build\windows\arm',
+            '-G',
+            'Ninja',
+            '-DCMAKE_TOOLCHAIN_FILE=$toolchain\\rt-cross.cmake',
+            '-DCMAKE_BUILD_TYPE=Release',
+            '-DFLUTTER_ARM32_TOOLCHAIN_ROOT=$toolchain\\native',
+            '-DFLUTTER_ARM32_CPPWINRT_INCLUDE=$toolchain\\include',
+            '-DFLUTTER_TARGET_PLATFORM=windows-arm',
+          ],
+        ),
+      ]);
+      final command = BuildWindowsCommand(
+        logger: BufferLogger.test(),
+        operatingSystemUtils: FakeOperatingSystemUtils(),
+      )..visualStudioOverride = FakeVisualStudio(cmakePath: null);
+      await createTestCommandRunner(command).run(const <String>[
+        'windows',
+        '--no-pub',
+        '--release',
+        '--config-only',
+        '--target-platform=windows-arm',
+      ]);
+      expect(processManager, hasNoRemainingExpectations);
+    },
+    overrides: <Type, Generator>{
+      Platform: () => windowsPlatform,
+      FileSystem: () => fileSystem,
+      ProcessManager: () => processManager,
+      FeatureFlags: () => TestFeatureFlags(isWindowsEnabled: true),
+    },
+  );
 
   testUsingContext(
     'Windows build fails when there is no cmake path',

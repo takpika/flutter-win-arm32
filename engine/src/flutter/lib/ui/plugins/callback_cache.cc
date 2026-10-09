@@ -33,7 +33,9 @@ std::string DartCallbackCache::cache_path_;
 std::map<int64_t, DartCallbackRepresentation> DartCallbackCache::cache_;
 
 void DartCallbackCache::SetCachePath(const std::string& path) {
-  cache_path_ = fml::paths::JoinPaths({path, kCacheName});
+  std::scoped_lock lock(mutex_);
+  cache_path_ = path.empty() ? std::string()
+                            : fml::paths::JoinPaths({path, kCacheName});
 }
 
 Dart_Handle DartCallbackCache::GetCallback(int64_t handle) {

@@ -83,7 +83,13 @@ class UnpackWindows extends Target {
     );
     final Depfile depfile = unpackDesktopArtifacts(
       fileSystem: environment.fileSystem,
-      artifacts: _kWindowsArtifacts,
+      artifacts: targetPlatform == TargetPlatform.windows_arm
+          ? <String>[
+              ..._kWindowsArtifacts.where((name) =>
+                  name != 'flutter_windows.dll.exp' && name != 'flutter_windows.dll.pdb'),
+              'flutter_windows.pdb',
+            ]
+          : _kWindowsArtifacts,
       engineSourcePath: engineSourcePath,
       outputDirectory: outputDirectory,
       clientSourcePaths: <String>[clientSourcePath],
@@ -194,6 +200,38 @@ class WindowsAotBundle extends Target {
   }
 }
 
+/// Uses the Windows ARM SDK snapshot backend, including Thumb-2 conversion.
+class WindowsArmAotElfRelease extends AotElfRelease {
+  const WindowsArmAotElfRelease() : super(TargetPlatform.windows_arm);
+
+  @override
+  String get name => 'windows_arm_aot_elf_release';
+
+  @override
+  Future<void> build(Environment environment) {
+    if (environment.defines[kTargetPlatform] != 'windows-arm' ||
+        environment.defines[kBuildMode] != 'release') {
+      throw ArgumentError('windows_arm_aot_elf_release requires windows-arm and release mode');
+    }
+    return super.build(environment);
+  }
+
+  @override
+  List<Source> get inputs => <Source>[
+    ...super.inputs,
+    const Source.pattern(
+      '{FLUTTER_ROOT}/bin/cache/artifacts/engine/windows-arm-release/gen_snapshot_raw',
+    ),
+    const Source.pattern(
+      '{FLUTTER_ROOT}/bin/cache/artifacts/engine/windows-arm-release/gen_snapshot_config.json',
+    ),
+    const Source.pattern('{FLUTTER_ROOT}/packages/flutter_tools/lib/src/base/build.dart'),
+    const Source.pattern(
+      '{FLUTTER_ROOT}/bin/cache/artifacts/engine/windows-arm-release/arm32-sdk-artifacts.json',
+    ),
+  ];
+}
+
 class ReleaseBundleWindowsAssets extends BundleWindowsAssets {
   const ReleaseBundleWindowsAssets(super.targetPlatform);
 
@@ -206,7 +244,9 @@ class ReleaseBundleWindowsAssets extends BundleWindowsAssets {
   @override
   List<Target> get dependencies => <Target>[
     ...super.dependencies,
-    WindowsAotBundle(AotElfRelease(targetPlatform)),
+    WindowsAotBundle(targetPlatform == TargetPlatform.windows_arm
+        ? const WindowsArmAotElfRelease()
+        : AotElfRelease(targetPlatform)),
   ];
 }
 

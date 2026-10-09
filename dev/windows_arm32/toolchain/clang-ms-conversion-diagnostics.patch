@@ -1,0 +1,262 @@
+--- a/clang/lib/Sema/SemaChecking.cpp
++++ b/clang/lib/Sema/SemaChecking.cpp
+@@ -11602,6 +11602,26 @@
+   if (E->EvaluateAsRValue(result, C, InConstantContext))
+     return GetValueRange(result.Val, GetExprType(E), MaxWidth);
+ 
++  // MSVC represents explicit integer promotions with a no-op cast around
++  // their implicit conversion. Preserve its operand range for diagnostics.
++  if (C.getLangOpts().MSVCCompat &&
++      C.getTargetInfo().getTriple().isOSWindows()) {
++    if (const auto *CE = dyn_cast<ExplicitCastExpr>(E)) {
++      const auto *Promotion = dyn_cast<ImplicitCastExpr>(CE->getSubExpr());
++      if (CE->getCastKind() == CK_NoOp && Promotion &&
++          Promotion->getCastKind() == CK_IntegralCast) {
++        QualType InputType = Promotion->getSubExpr()->getType();
++        QualType OutputType = Promotion->getType();
++        if (InputType->isIntegerType() && OutputType->isIntegerType() &&
++            C.getIntWidth(OutputType) > C.getIntWidth(InputType) &&
++            (InputType->isUnsignedIntegerType() ||
++             OutputType->isSignedIntegerType()))
++          return TryGetExprRange(C, Promotion->getSubExpr(), MaxWidth,
++                                 InConstantContext, Approximate);
++      }
++    }
++  }
++
+   // I think we only want to look through implicit casts here; if the
+   // user has an explicit widening cast, we should treat the value as
+   // being of the new, wider type.
+@@ -11717,6 +11737,12 @@
+ 
+     // Left shift gets black-listed based on a judgement call.
+     case BO_Shl:
++      // Match MSVC's approximate narrowing diagnostic for promoted small
++      // integer bit masks. Exact range queries still account for shift growth.
++      if (Approximate && C.getLangOpts().MSVCCompat &&
++          C.getTargetInfo().getTriple().isOSWindows())
++        return TryGetExprRange(C, BO->getLHS(), MaxWidth, InConstantContext,
++                               Approximate);
+       // ...except that we want to treat '1 << (blah)' as logically
+       // positive.  It's an important idiom.
+       if (IntegerLiteral *I
+@@ -11959,7 +11985,8 @@
+ }
+ 
+ static void AnalyzeImplicitConversions(Sema &S, Expr *E, SourceLocation CC,
+-                                       bool IsListInit = false);
++                                       bool IsListInit = false,
++                                       bool IsUsualArithmeticConversion = false);
+ 
+ static bool IsEnumConstOrFromMacro(Sema &S, const Expr *E) {
+   // Suppress cases where we are comparing against an enum constant.
+@@ -12295,8 +12322,14 @@
+ /// Analyze the operands of the given comparison.  Implements the
+ /// fallback case from AnalyzeComparison.
+ static void AnalyzeImpConvsInComparison(Sema &S, BinaryOperator *E) {
+-  AnalyzeImplicitConversions(S, E->getLHS(), E->getOperatorLoc());
+-  AnalyzeImplicitConversions(S, E->getRHS(), E->getOperatorLoc());
++  bool IsUsualArithmeticConversion =
++      E->getLHS()->getType()->isRealFloatingType() &&
++      S.Context.hasSameUnqualifiedType(E->getLHS()->getType(),
++                                       E->getRHS()->getType());
++  AnalyzeImplicitConversions(S, E->getLHS(), E->getOperatorLoc(), false,
++                             IsUsualArithmeticConversion);
++  AnalyzeImplicitConversions(S, E->getRHS(), E->getOperatorLoc(), false,
++                             IsUsualArithmeticConversion);
+ }
+ 
+ /// Implements -Wsign-compare.
+@@ -12589,8 +12622,13 @@
+   // We want to recurse on the RHS as normal unless we're assigning to
+   // a bitfield.
+   if (FieldDecl *Bitfield = E->getLHS()->getSourceBitField()) {
++    bool MSVCIntegerBitfield =
++        S.getLangOpts().MSVCCompat &&
++        S.Context.getTargetInfo().getTriple().isOSWindows() &&
++        Bitfield->getType()->isIntegerType() &&
++        E->getRHS()->IgnoreParenImpCasts()->getType()->isIntegerType();
+     if (AnalyzeBitFieldAssignment(S, Bitfield, E->getRHS(),
+-                                  E->getOperatorLoc())) {
++                                  E->getOperatorLoc()) || MSVCIntegerBitfield) {
+       // Recurse, ignoring any implicit conversions on the RHS.
+       return AnalyzeImplicitConversions(S, E->getRHS()->IgnoreParenImpCasts(),
+                                         E->getOperatorLoc());
+@@ -12759,7 +12797,11 @@
+          "Must be compound assignment operation");
+   // Recurse on the LHS and RHS in here
+   AnalyzeImplicitConversions(S, E->getLHS(), E->getOperatorLoc());
+-  AnalyzeImplicitConversions(S, E->getRHS(), E->getOperatorLoc());
++  bool IsUsualArithmeticConversion = cast<CompoundAssignOperator>(E)
++                                        ->getComputationResultType()
++                                        ->isRealFloatingType();
++  AnalyzeImplicitConversions(S, E->getRHS(), E->getOperatorLoc(), false,
++                             IsUsualArithmeticConversion);
+ 
+   if (E->getLHS()->getType()->isAtomicType())
+     S.Diag(E->getOperatorLoc(), diag::warn_atomic_implicit_seq_cst);
+@@ -13036,6 +13078,12 @@
+ 
+ void Sema::CheckImplicitConversion(Expr *E, QualType T, SourceLocation CC,
+                                    bool *ICContext, bool IsListInit) {
++  CheckImplicitConversion(E, T, CC, ICContext, IsListInit, false);
++}
++
++void Sema::CheckImplicitConversion(Expr *E, QualType T, SourceLocation CC,
++                                   bool *ICContext, bool IsListInit,
++                                   bool IsUsualArithmeticConversion) {
+   if (E->isTypeDependent() || E->isValueDependent()) return;
+ 
+   const Type *Source = Context.getCanonicalType(E->getType()).getTypePtr();
+@@ -13221,7 +13269,8 @@
+         // Don't warn about float constants that are precisely
+         // representable in the target type.
+         Expr::EvalResult result;
+-        if (E->EvaluateAsRValue(result, Context)) {
++        bool IsConstant = E->EvaluateAsRValue(result, Context);
++        if (IsConstant) {
+           // Value might be a float, a float vector, or a float complex.
+           if (IsSameFloatAfterCast(
+                   result.Val,
+@@ -13233,7 +13282,23 @@
+         if (SourceMgr.isInSystemMacro(CC))
+           return;
+ 
+-        DiagnoseImpCast(*this, E, T, CC, diag::warn_impcast_float_precision);
++        unsigned DiagID = diag::warn_impcast_float_precision;
++        if (getLangOpts().MSVCCompat &&
++            Context.getTargetInfo().getTriple().isOSWindows() && IsConstant &&
++            result.Val.isFloat()) {
++          // MSVC classifies constant truncation as C4305, not C4244. Retain
++          // the warning and global -Werror while separating its warning group.
++          DiagID = Diags.getDiagnosticIDs()->getCustomDiagID(
++              DiagnosticIDs::CustomDiagDesc(
++                  Diags.getDiagnosticLevel(diag::warn_impcast_float_precision,
++                                           CC) == DiagnosticsEngine::Ignored
++                      ? diag::Severity::Ignored
++                      : diag::Severity::Warning,
++                  "implicit conversion loses floating-point precision: %0 to %1",
++                  DiagnosticIDs::CLASS_WARNING, false, false,
++                  diag::Group::LiteralConversion));
++        }
++        DiagnoseImpCast(*this, E, T, CC, DiagID);
+       }
+       // ... or possibly if we're increasing rank, too
+       else if (Order < 0) {
+@@ -13346,7 +13411,9 @@
+   // initialization-list syntax, we might lose accuracy if the floating
+   // point type has a narrower significand than the integer type.
+   if (SourceBT && TargetBT && SourceBT->isIntegerType() &&
+-      TargetBT->isFloatingType() && !IsListInit) {
++      TargetBT->isFloatingType() && !IsListInit &&
++      !(IsUsualArithmeticConversion && getLangOpts().MSVCCompat &&
++        Context.getTargetInfo().getTriple().isOSWindows())) {
+     // Determine the number of precision bits in the source integer type.
+     std::optional<IntRange> SourceRange =
+         TryGetExprRange(Context, E, isConstantEvaluatedContext(),
+@@ -13585,25 +13652,30 @@
+ }
+ 
+ static void CheckConditionalOperator(Sema &S, AbstractConditionalOperator *E,
+-                                     SourceLocation CC, QualType T);
++                                     SourceLocation CC, QualType T,
++                                     bool ParentUsualArithmetic = false);
+ 
+ static void CheckConditionalOperand(Sema &S, Expr *E, QualType T,
+-                                    SourceLocation CC, bool &ICContext) {
++                                    SourceLocation CC, bool &ICContext,
++                                    bool IsUsualArithmeticConversion) {
+   E = E->IgnoreParenImpCasts();
+   // Diagnose incomplete type for second or third operand in C.
+   if (!S.getLangOpts().CPlusPlus && E->getType()->isRecordType())
+     S.RequireCompleteExprType(E, diag::err_incomplete_type);
+ 
+   if (auto *CO = dyn_cast<AbstractConditionalOperator>(E))
+-    return CheckConditionalOperator(S, CO, CC, T);
++    return CheckConditionalOperator(S, CO, CC, T,
++                                    IsUsualArithmeticConversion);
+ 
+   AnalyzeImplicitConversions(S, E, CC);
+   if (E->getType() != T)
+-    return S.CheckImplicitConversion(E, T, CC, &ICContext);
++    return S.CheckImplicitConversion(E, T, CC, &ICContext, false,
++                                     IsUsualArithmeticConversion);
+ }
+ 
+ static void CheckConditionalOperator(Sema &S, AbstractConditionalOperator *E,
+-                                     SourceLocation CC, QualType T) {
++                                     SourceLocation CC, QualType T,
++                                     bool ParentUsualArithmetic) {
+   AnalyzeImplicitConversions(S, E->getCond(), E->getQuestionLoc());
+ 
+   Expr *TrueExpr = E->getTrueExpr();
+@@ -13611,8 +13683,12 @@
+     TrueExpr = BCO->getCommon();
+ 
+   bool Suspicious = false;
+-  CheckConditionalOperand(S, TrueExpr, T, CC, Suspicious);
+-  CheckConditionalOperand(S, E->getFalseExpr(), T, CC, Suspicious);
++  bool IsUsualArithmeticConversion =
++      ParentUsualArithmetic || E->getType()->isRealFloatingType();
++  CheckConditionalOperand(S, TrueExpr, T, CC, Suspicious,
++                          IsUsualArithmeticConversion);
++  CheckConditionalOperand(S, E->getFalseExpr(), T, CC, Suspicious,
++                          IsUsualArithmeticConversion);
+ 
+   if (T->isBooleanType())
+     DiagnoseIntInBoolContext(S, E);
+@@ -13655,6 +13731,7 @@
+   Expr *E;
+   SourceLocation CC;
+   bool IsListInit;
++  bool IsUsualArithmeticConversion = false;
+ };
+ }
+ 
+@@ -13766,7 +13843,8 @@
+   // The non-canonical typecheck is just an optimization;
+   // CheckImplicitConversion will filter out dead implicit conversions.
+   if (SourceExpr->getType() != T)
+-    S.CheckImplicitConversion(SourceExpr, T, CC, nullptr, IsListInit);
++    S.CheckImplicitConversion(SourceExpr, T, CC, nullptr, IsListInit,
++                              Item.IsUsualArithmeticConversion);
+ 
+   // Now continue drilling into this expression.
+ 
+@@ -13855,7 +13933,10 @@
+       // Ignore checking string literals that are in logical and operators.
+       // This is a common pattern for asserts.
+       continue;
+-    WorkList.push_back({ChildExpr, CC, IsListInit});
++    bool IsUsualArithmeticConversion =
++        BO && (BO->isAdditiveOp() || BO->isMultiplicativeOp()) &&
++        BO->getType()->isRealFloatingType();
++    WorkList.push_back({ChildExpr, CC, IsListInit, IsUsualArithmeticConversion});
+   }
+ 
+   if (BO && BO->isLogicalOp()) {
+@@ -13883,9 +13964,10 @@
+ /// implicit conversions in the given expression.  There are a couple
+ /// of competing diagnostics here, -Wconversion and -Wsign-compare.
+ static void AnalyzeImplicitConversions(Sema &S, Expr *OrigE, SourceLocation CC,
+-                                       bool IsListInit/*= false*/) {
++                                       bool IsListInit/*= false*/,
++                                       bool IsUsualArithmeticConversion) {
+   llvm::SmallVector<AnalyzeImplicitConversionsWorkItem, 16> WorkList;
+-  WorkList.push_back({OrigE, CC, IsListInit});
++  WorkList.push_back({OrigE, CC, IsListInit, IsUsualArithmeticConversion});
+   while (!WorkList.empty())
+     AnalyzeImplicitConversions(S, WorkList.pop_back_val(), WorkList);
+ }
+--- a/clang/include/clang/Sema/Sema.h
++++ b/clang/include/clang/Sema/Sema.h
+@@ -2922,6 +2922,9 @@
+   void CheckImplicitConversion(Expr *E, QualType T, SourceLocation CC,
+                                bool *ICContext = nullptr,
+                                bool IsListInit = false);
++  void CheckImplicitConversion(Expr *E, QualType T, SourceLocation CC,
++                               bool *ICContext, bool IsListInit,
++                               bool IsUsualArithmeticConversion);
+ 
+   /// Check for overflow behavior type related implicit conversion diagnostics.
+   /// Returns true if OBT-related diagnostic was issued, false otherwise.

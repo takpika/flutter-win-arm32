@@ -1,0 +1,1288 @@
+name: Windows ARM32 SDK host tools
+
+on:
+  workflow_dispatch:
+    inputs:
+      windows_sdk_assembly:
+        description: Assemble both engine families with native Windows SDK dependencies
+        type: boolean
+        default: false
+      windows_resources:
+        description: Build common LLVM Windows resource utilities
+        type: boolean
+        default: false
+      windows_compiler:
+        description: Cross-build Windows x64 compiler using verified Python payloads
+        type: boolean
+        default: false
+      windows_flutter_bootstrap:
+        description: Execute normal flutter.bat bootstrap and Unicode relocation under Wine
+        type: boolean
+        default: false
+      sdk_host_bootstrap:
+        description: Stage current port sources with exact official caches for all four SDK hosts
+        type: boolean
+        default: false
+      windows_rust:
+        description: Verify complete Windows x64 Rust toolchains under Wine
+        type: boolean
+        default: false
+      frontend_generators:
+        description: Build Linux-host frontend AOT generators for all official SDK host targets
+        type: boolean
+        default: false
+      frontend_snapshots:
+        description: Generate matching source frontend AOT snapshots using verified cross generators
+        type: boolean
+        default: false
+      frontend_generator_run_id:
+        description: Successful four-host frontend cross-generator workflow run
+        default: ''
+      windows_frontend_runtime:
+        description: Execute the generated Windows frontend on the official Windows Dart runtime
+        type: boolean
+        default: false
+      frontend_snapshot_run_id:
+        description: Successful generated four-host frontend workflow run
+        default: '38445964591'
+      frontend_platform_run_id:
+        description: Matching source-built ARM32 platform workflow run
+        default: '38423410946'
+      windows_msix:
+        description: Cross-build and execute the full upstream Windows MSIX packager
+        type: boolean
+        default: false
+      msix_fixture_run_id:
+        description: Successful source-build run containing the real Phone packaging fixture
+        default: '38423410946'
+      msix_packager_run_id:
+        description: Reuse a source-built Windows packager only for runtime packaging tests
+        default: ''
+      msix_xml_parser:
+        description: Upstream Windows XML backend with full schema validation
+        type: choice
+        options: [msxml6, xerces]
+        default: msxml6
+      windows_snapshot:
+        description: Build and execute Windows x64 ARM32 snapshot generator from current Dart source
+        type: boolean
+        default: false
+      snapshot_frontend_run_id:
+        description: Current-source Linux frontend and Windows ARM32 platform build
+        default: '38402528937'
+      snapshot_aot:
+        description: Generate a real ARM32 AOT ELF using the native Windows generator
+        type: boolean
+        default: false
+      snapshot_generator_run_id:
+        description: Reuse an audited current-source Windows generator for runtime verification only
+        default: ''
+      snapshot_compiler_run_id:
+        description: Successful Linux source-built common compiler workflow run
+        default: '38402528937'
+      windows_compiler_runtime:
+        description: Execute the packaged Windows compiler and its compatibility regression tests
+        type: boolean
+        default: false
+      compiler_package_run_id:
+        description: Successful packaged Windows compiler workflow run
+        default: '38400781351'
+      python_run_id:
+        description: Successful four-host Python payload workflow run
+        default: '38388564532'
+      windows_compiler_run_id:
+        description: Successful raw Windows compiler build to package without recompiling
+        default: ''
+  push:
+    branches: [windows-arm32-3.38.10]
+    paths:
+      - dev/windows_arm32/sdk-hosts.json
+      - dev/windows_arm32/sdk_hosts.py
+      - dev/windows_arm32/toolchain/*windows*launcher*
+      - .github/workflows/windows-arm32-host-tools.yml
+
+permissions:
+  contents: read
+  actions: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  windows_launchers:
+    if: ${{ !inputs.windows_resources && !inputs.windows_sdk_assembly && !inputs.windows_flutter_bootstrap && !inputs.sdk_host_bootstrap && !inputs.windows_compiler && !inputs.windows_rust && !inputs.windows_compiler_runtime && !inputs.windows_snapshot && !inputs.windows_msix && !inputs.frontend_generators && !inputs.frontend_snapshots && !inputs.windows_frontend_runtime }}
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    timeout-minutes: 30
+    env:
+      TMPDIR: ${{ github.workspace }}/_work/tmp
+    steps:
+      - name: Prepare Ubuntu amd64 container
+        run: |
+          test "$(uname -m)" = x86_64
+          mkdir -p "$TMPDIR"
+          export DEBIAN_FRONTEND=noninteractive
+          dpkg --add-architecture i386
+          apt-get update
+          apt-get install -y --no-install-recommends curl ca-certificates python3 \
+            xz-utils gnupg xvfb xauth imagemagick
+          mkdir -p /etc/apt/keyrings
+          curl --fail --location --retry 3 https://dl.winehq.org/wine-builds/winehq.key \
+            --output /etc/apt/keyrings/winehq.asc
+          echo 'd965d646defe94b3dfba6d5b4406900ac6c81065428bf9d9303ad7a72ee8d1b8  /etc/apt/keyrings/winehq.asc' | sha256sum --check
+          gpg --batch --dearmor --output /etc/apt/keyrings/winehq-archive.key /etc/apt/keyrings/winehq.asc
+          curl --fail --location --retry 3 \
+            https://dl.winehq.org/wine-builds/ubuntu/dists/noble/winehq-noble.sources \
+            --output /etc/apt/sources.list.d/winehq-noble.sources
+          echo 'b5962429ece1f831c9f713c13f9f0d26bb367117ef56706648ff385f004779fb  /etc/apt/sources.list.d/winehq-noble.sources' | sha256sum --check
+          apt-get update
+          apt-get install -y --install-recommends winehq-stable=11.0.0.0~noble-1
+          # Supply Wine 11's standard addons before prefix initialization;
+          # otherwise its interactive Mono installer blocks unattended tests.
+          # SHA-256 values come from Wine 11.0 dlls/appwiz.cpl/addons.c.
+          mkdir -p /opt/wine/mono /opt/wine/gecko
+          curl --fail --location --retry 3 \
+            https://dl.winehq.org/wine/wine-mono/10.4.1/wine-mono-10.4.1-x86.msi \
+            --output /opt/wine/mono/wine-mono-10.4.1-x86.msi
+          echo '071f4b2887e1c97a11d791ff3d65be9429eed6dec4c2708888bfd546ba358e23  /opt/wine/mono/wine-mono-10.4.1-x86.msi' | sha256sum --check
+          curl --fail --location --retry 3 \
+            https://dl.winehq.org/wine/wine-gecko/2.47.4/wine-gecko-2.47.4-x86.msi \
+            --output /opt/wine/gecko/wine-gecko-2.47.4-x86.msi
+          echo '26cecc47706b091908f7f814bddb074c61beb8063318e9efc5a7f789857793d6  /opt/wine/gecko/wine-gecko-2.47.4-x86.msi' | sha256sum --check
+          curl --fail --location --retry 3 \
+            https://dl.winehq.org/wine/wine-gecko/2.47.4/wine-gecko-2.47.4-x86_64.msi \
+            --output /opt/wine/gecko/wine-gecko-2.47.4-x86_64.msi
+          echo 'e590b7d988a32d6aa4cf1d8aa3aa3d33766fdd4cf4c89c2dcc2095ecb28d066f  /opt/wine/gecko/wine-gecko-2.47.4-x86_64.msi' | sha256sum --check
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Prepare pinned cross compiler and official Windows Python
+        run: |
+          mkdir -p _work/tmp
+          export TMPDIR="$GITHUB_WORKSPACE/_work/tmp"
+          echo "TMPDIR=$TMPDIR" >> "$GITHUB_ENV"
+          archive=llvm-mingw-20251104-ucrt-ubuntu-22.04-x86_64.tar.xz
+          curl --fail --location --retry 3 \
+            "https://github.com/mstorsjo/llvm-mingw/releases/download/20251104/$archive" \
+            --output "_work/$archive"
+          echo "3aed6fa47be909884cb3e5634d6b7254604d7104832d6312f8435fb23d5a9bab  _work/$archive" | sha256sum --check
+          tar -xf "_work/$archive" -C _work
+          curl --fail --location --retry 3 \
+            https://www.python.org/ftp/python/3.14.6/python-3.14.6-embed-amd64.zip \
+            --output _work/python-windows.zip
+          echo 'df901e84a896ff1ee720ad03377e0c8d8c2244fda79808aeeaff6316df1cb75c  _work/python-windows.zip' | sha256sum --check
+      - name: Cross-build Windows x64 launcher from source
+        run: |
+          python3 dev/windows_arm32/toolchain/build_windows_launcher.py \
+            --compiler _work/llvm-mingw-20251104-ucrt-ubuntu-22.04-x86_64/bin/x86_64-w64-mingw32-clang \
+            --output _work/launcher/sdk-python-launcher.exe
+      - name: Verify Windows arguments, Unicode paths, streams and relocation
+        run: |
+          xvfb-run -a python3 dev/windows_arm32/toolchain/check_windows_launchers.py \
+            --launcher _work/launcher/sdk-python-launcher.exe \
+            --python-archive _work/python-windows.zip --output _work/launcher-check
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: windows-arm32-windows-x64-launcher
+          path: |
+            _work/launcher/sdk-python-launcher.exe
+            _work/launcher/sdk-python-launcher.provenance.json
+            _work/launcher-check/verification.json
+            _work/launcher-check/wine-baseline.json
+            _work/launcher-check/*-stdout.log
+            _work/launcher-check/*-stderr.log
+            _work/launcher-check/wine-desktop.png
+          if-no-files-found: warn
+  python_payloads:
+    if: ${{ !inputs.windows_resources && !inputs.windows_sdk_assembly && !inputs.windows_flutter_bootstrap && !inputs.sdk_host_bootstrap && !inputs.windows_compiler && !inputs.windows_rust && !inputs.windows_compiler_runtime && !inputs.windows_snapshot && !inputs.windows_msix && !inputs.frontend_generators && !inputs.frontend_snapshots && !inputs.windows_frontend_runtime }}
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [linux-x64, macos-x64, macos-arm64, windows-x64]
+    steps:
+      - name: Prepare native packaging tools in Ubuntu amd64
+        run: |
+          test "$(uname -m)" = x86_64
+          mkdir -p "$GITHUB_WORKSPACE/_work/tmp"
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl \
+            python3 python3-pip zstd patchelf binutils llvm
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Stage exact host Python and Pillow with native dependency auditing
+        env:
+          SDK_HOST: ${{ matrix.host }}
+        run: |
+          mkdir -p _work/tmp
+          export TMPDIR="$GITHUB_WORKSPACE/_work/tmp"
+          export TMP="$TMPDIR" TEMP="$TMPDIR" PYTHONDONTWRITEBYTECODE=1
+          python3 -B - <<'PY'
+          import os, subprocess, sys, tarfile
+          from pathlib import Path
+          from urllib.parse import unquote, urlparse
+          sys.path.insert(0, 'dev/windows_arm32/toolchain')
+          from prepare_python import prepare, inputs
+          from sdk_hosts import select_host
+          host = select_host(os.environ['SDK_HOST'])
+          record = inputs(host)
+          work = Path('_work').resolve()
+          archive = work / 'python-source.tar.zst'
+          wheel = work / unquote(Path(urlparse(record['wheelUrl']).path).name)
+          for url, destination in ((record['archiveUrl'], archive), (record['wheelUrl'], wheel)):
+              subprocess.run(['curl', '--fail', '--location', '--retry', '3',
+                              url, '--output', str(destination)], check=True)
+          stage = prepare(archive, wheel, work / 'python', host=host['id'],
+                          installer_python=Path(sys.executable),
+                          llvm_readobj=Path('/usr/bin/llvm-readobj'),
+                          llvm_objdump=Path('/usr/bin/llvm-objdump'))
+          with tarfile.open(work / ('python-' + host['id'] + '.tar.gz'), 'w:gz') as package:
+              package.add(stage, arcname='.')
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-arm32-python-${{ matrix.host }}
+          path: |
+            _work/python-${{ matrix.host }}.tar.gz
+            _work/python/python-provenance.json
+          if-no-files-found: error
+  windows_compiler:
+    if: inputs.windows_compiler
+    uses: ./.github/workflows/windows-arm32-windows-compiler.yml
+    with:
+      python_run_id: ${{ inputs.python_run_id }}
+      compiler_run_id: ${{ inputs.windows_compiler_run_id }}
+      compile: true
+  windows_rust:
+    if: inputs.windows_rust
+    env:
+      TMPDIR: ${{ github.workspace }}/_work/tmp
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ['1.95.0', '1.93.1']
+    steps:
+      - name: Prepare Ubuntu amd64 container
+        run: |
+          test "$(uname -m)" = x86_64
+          mkdir -p "$TMPDIR"
+          export DEBIAN_FRONTEND=noninteractive
+          dpkg --add-architecture i386
+          apt-get update
+          apt-get install -y --no-install-recommends curl ca-certificates python3 \
+            xz-utils gnupg xvfb xauth imagemagick binutils llvm
+          mkdir -p /etc/apt/keyrings
+          curl --fail --location --retry 3 https://dl.winehq.org/wine-builds/winehq.key \
+            --output /etc/apt/keyrings/winehq.asc
+          echo 'd965d646defe94b3dfba6d5b4406900ac6c81065428bf9d9303ad7a72ee8d1b8  /etc/apt/keyrings/winehq.asc' | sha256sum --check
+          gpg --batch --dearmor --output /etc/apt/keyrings/winehq-archive.key /etc/apt/keyrings/winehq.asc
+          curl --fail --location --retry 3 \
+            https://dl.winehq.org/wine-builds/ubuntu/dists/noble/winehq-noble.sources \
+            --output /etc/apt/sources.list.d/winehq-noble.sources
+          echo 'b5962429ece1f831c9f713c13f9f0d26bb367117ef56706648ff385f004779fb  /etc/apt/sources.list.d/winehq-noble.sources' | sha256sum --check
+          apt-get update
+          apt-get install -y --install-recommends winehq-stable=11.0.0.0~noble-1
+          # Supply Wine 11's standard addons before prefix initialization;
+          # otherwise its interactive Mono installer blocks unattended tests.
+          # SHA-256 values come from Wine 11.0 dlls/appwiz.cpl/addons.c.
+          mkdir -p /opt/wine/mono /opt/wine/gecko
+          curl --fail --location --retry 3 \
+            https://dl.winehq.org/wine/wine-mono/10.4.1/wine-mono-10.4.1-x86.msi \
+            --output /opt/wine/mono/wine-mono-10.4.1-x86.msi
+          echo '071f4b2887e1c97a11d791ff3d65be9429eed6dec4c2708888bfd546ba358e23  /opt/wine/mono/wine-mono-10.4.1-x86.msi' | sha256sum --check
+          curl --fail --location --retry 3 \
+            https://dl.winehq.org/wine/wine-gecko/2.47.4/wine-gecko-2.47.4-x86.msi \
+            --output /opt/wine/gecko/wine-gecko-2.47.4-x86.msi
+          echo '26cecc47706b091908f7f814bddb074c61beb8063318e9efc5a7f789857793d6  /opt/wine/gecko/wine-gecko-2.47.4-x86.msi' | sha256sum --check
+          curl --fail --location --retry 3 \
+            https://dl.winehq.org/wine/wine-gecko/2.47.4/wine-gecko-2.47.4-x86_64.msi \
+            --output /opt/wine/gecko/wine-gecko-2.47.4-x86_64.msi
+          echo 'e590b7d988a32d6aa4cf1d8aa3aa3d33766fdd4cf4c89c2dcc2095ecb28d066f  /opt/wine/gecko/wine-gecko-2.47.4-x86_64.msi' | sha256sum --check
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install exact official Windows Rust components in private directories
+        env:
+          RUST_VERSION: ${{ matrix.version }}
+        run: |
+          mkdir -p _work/tmp
+          export TMPDIR="$GITHUB_WORKSPACE/_work/tmp"
+          export CARGO_HOME="$GITHUB_WORKSPACE/_work/cargo"
+          export RUSTUP_HOME="$GITHUB_WORKSPACE/_work/rustup"
+          echo "TMPDIR=$TMPDIR" >> "$GITHUB_ENV"
+          curl --fail --location --retry 3 \
+            https://static.rust-lang.org/rustup/archive/1.28.2/x86_64-unknown-linux-gnu/rustup-init \
+            --output _work/rustup-init
+          echo '20a06e644b0d9bd2fbdbfd52d42540bdde820ea7df86e92e533c073da0cdd43c  _work/rustup-init' | sha256sum --check
+          chmod +x _work/rustup-init
+          _work/rustup-init -y --no-modify-path --default-toolchain none
+          "$CARGO_HOME/bin/rustup" toolchain install "$RUST_VERSION-x86_64-pc-windows-gnu" \
+            --force-non-host --no-self-update --profile minimal --component rust-src
+          curl --fail --location --retry 3 \
+            https://static.rust-lang.org/rustup/archive/1.28.2/x86_64-pc-windows-msvc/rustup-init.exe \
+            --output _work/rustup-windows.exe
+          echo '88d8258dcf6ae4f7a80c7d1088e1f36fa7025a1cfd1343731b4ee6f385121fc0  _work/rustup-windows.exe' | sha256sum --check
+      - name: Prepare source-built native launcher and official Windows Python for adapter checks
+        run: |
+          archive=llvm-mingw-20251104-ucrt-ubuntu-22.04-x86_64.tar.xz
+          curl --fail --location --retry 3 \
+            "https://github.com/mstorsjo/llvm-mingw/releases/download/20251104/$archive" \
+            --output "_work/$archive"
+          echo "3aed6fa47be909884cb3e5634d6b7254604d7104832d6312f8435fb23d5a9bab  _work/$archive" | sha256sum --check
+          tar -xf "_work/$archive" -C _work
+          python3 -B dev/windows_arm32/toolchain/build_windows_launcher.py \
+            --compiler _work/llvm-mingw-20251104-ucrt-ubuntu-22.04-x86_64/bin/x86_64-w64-mingw32-clang \
+            --output _work/launcher/sdk-python-launcher.exe
+          curl --fail --location --retry 3 \
+            https://www.python.org/ftp/python/3.14.6/python-3.14.6-embed-amd64.zip \
+            --output _work/python-windows.zip
+          echo 'df901e84a896ff1ee720ad03377e0c8d8c2244fda79808aeeaff6316df1cb75c  _work/python-windows.zip' | sha256sum --check
+      - name: Execute original and staged Rust compiler; audit full Windows component payload
+        env:
+          RUST_VERSION: ${{ matrix.version }}
+        run: |
+          export WINEPREFIX="$GITHUB_WORKSPACE/_work/wine-prefix" WINEARCH=win64
+          xvfb-run -a python3 -B dev/windows_arm32/toolchain/prepare_rust_distribution.py \
+            --host windows-x64 --runner wine --version "$RUST_VERSION" \
+            --rustc "_work/rustup/toolchains/$RUST_VERSION-x86_64-pc-windows-gnu/bin/rustc.exe" \
+            --rustup _work/rustup-windows.exe --llvm-readobj /usr/bin/llvm-readobj \
+            --output _work/distribution
+          tar -czf "_work/windows-arm32-rust-$RUST_VERSION-windows-x64.tar.gz" -C _work/distribution .
+      - name: Verify native Rust and Cargo adapter invocation after Unicode SDK relocation
+        run: |
+          export WINEPREFIX="$GITHUB_WORKSPACE/_work/wine-prefix" WINEARCH=win64
+          xvfb-run -a python3 -B dev/windows_arm32/toolchain/check_windows_rust_adapters.py \
+            --distribution _work/distribution --launcher _work/launcher/sdk-python-launcher.exe \
+            --python-archive _work/python-windows.zip --output _work/adapter-check
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-arm32-rust-${{ matrix.version }}-windows-x64
+          path: |
+            _work/windows-arm32-rust-${{ matrix.version }}-windows-x64.tar.gz
+            _work/distribution/rust-distribution-provenance.json
+            _work/adapter-check/verification.json
+          if-no-files-found: error
+  windows_compiler_runtime:
+    if: inputs.windows_compiler_runtime
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    timeout-minutes: 30
+    env:
+      TMPDIR: ${{ github.workspace }}/_work/tmp
+    steps:
+      - name: Prepare Ubuntu amd64 container
+        run: |
+          test "$(uname -m)" = x86_64
+          mkdir -p "$TMPDIR"
+          export DEBIAN_FRONTEND=noninteractive
+          dpkg --add-architecture i386
+          apt-get update
+          apt-get install -y --no-install-recommends curl ca-certificates python3 \
+            xz-utils gnupg xvfb xauth imagemagick
+          mkdir -p /etc/apt/keyrings
+          curl --fail --location --retry 3 https://dl.winehq.org/wine-builds/winehq.key \
+            --output /etc/apt/keyrings/winehq.asc
+          echo 'd965d646defe94b3dfba6d5b4406900ac6c81065428bf9d9303ad7a72ee8d1b8  /etc/apt/keyrings/winehq.asc' | sha256sum --check
+          gpg --batch --dearmor --output /etc/apt/keyrings/winehq-archive.key /etc/apt/keyrings/winehq.asc
+          curl --fail --location --retry 3 \
+            https://dl.winehq.org/wine-builds/ubuntu/dists/noble/winehq-noble.sources \
+            --output /etc/apt/sources.list.d/winehq-noble.sources
+          echo 'b5962429ece1f831c9f713c13f9f0d26bb367117ef56706648ff385f004779fb  /etc/apt/sources.list.d/winehq-noble.sources' | sha256sum --check
+          apt-get update
+          apt-get install -y --install-recommends winehq-stable=11.0.0.0~noble-1
+          # Supply Wine 11's standard addons before prefix initialization;
+          # otherwise its interactive Mono installer blocks unattended tests.
+          # SHA-256 values come from Wine 11.0 dlls/appwiz.cpl/addons.c.
+          mkdir -p /opt/wine/mono /opt/wine/gecko
+          curl --fail --location --retry 3 \
+            https://dl.winehq.org/wine/wine-mono/10.4.1/wine-mono-10.4.1-x86.msi \
+            --output /opt/wine/mono/wine-mono-10.4.1-x86.msi
+          echo '071f4b2887e1c97a11d791ff3d65be9429eed6dec4c2708888bfd546ba358e23  /opt/wine/mono/wine-mono-10.4.1-x86.msi' | sha256sum --check
+          curl --fail --location --retry 3 \
+            https://dl.winehq.org/wine/wine-gecko/2.47.4/wine-gecko-2.47.4-x86.msi \
+            --output /opt/wine/gecko/wine-gecko-2.47.4-x86.msi
+          echo '26cecc47706b091908f7f814bddb074c61beb8063318e9efc5a7f789857793d6  /opt/wine/gecko/wine-gecko-2.47.4-x86.msi' | sha256sum --check
+          curl --fail --location --retry 3 \
+            https://dl.winehq.org/wine/wine-gecko/2.47.4/wine-gecko-2.47.4-x86_64.msi \
+            --output /opt/wine/gecko/wine-gecko-2.47.4-x86_64.msi
+          echo 'e590b7d988a32d6aa4cf1d8aa3aa3d33766fdd4cf4c89c2dcc2095ecb28d066f  /opt/wine/gecko/wine-gecko-2.47.4-x86_64.msi' | sha256sum --check
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: windows-arm32-compiler-windows-x64
+          run-id: ${{ inputs.compiler_package_run_id }}
+          github-token: ${{ github.token }}
+          path: _work/compiler-input
+      - name: Extract and verify packaged native compiler files
+        run: |
+          mkdir -p _work/tmp _work/compiler
+          echo "TMPDIR=$GITHUB_WORKSPACE/_work/tmp" >> "$GITHUB_ENV"
+          cd _work/compiler-input
+          sha256sum --check windows-arm32-compiler-windows-x64.tar.gz.sha256
+          tar -xzf windows-arm32-compiler-windows-x64.tar.gz -C ../compiler
+          cd ../..
+          python3 -B - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          root = Path('_work/compiler')
+          manifest = json.loads((root / 'distribution-manifest.json').read_text())
+          for name, expected in manifest['files'].items():
+              if hashlib.sha256((root / name).read_bytes()).hexdigest() != expected['sha256']:
+                  raise SystemExit('Compiler file changed: ' + name)
+          PY
+      - name: Prepare pinned Windows Python and ARM32 development headers
+        run: |
+          curl --fail --location --retry 3 \
+            https://www.python.org/ftp/python/3.14.6/python-3.14.6-embed-amd64.zip \
+            --output _work/python-windows.zip
+          echo 'df901e84a896ff1ee720ad03377e0c8d8c2244fda79808aeeaff6316df1cb75c  _work/python-windows.zip' | sha256sum --check
+          python3 -B -m zipfile -e _work/python-windows.zip _work/python
+          archive=llvm-mingw-20251104-ucrt-ubuntu-22.04-x86_64.tar.xz
+          curl --fail --location --retry 3 \
+            "https://github.com/mstorsjo/llvm-mingw/releases/download/20251104/$archive" \
+            --output "_work/$archive"
+          echo "3aed6fa47be909884cb3e5634d6b7254604d7104832d6312f8435fb23d5a9bab  _work/$archive" | sha256sum --check
+          tar -xf "_work/$archive" -C _work
+      - name: Execute native Windows compiler with standard and MSVC semantics, Flutter values and ARM32 SEH
+        run: |
+          python3 -B dev/windows_arm32/toolchain/stage_windows_target_sysroot.py \
+            --source _work/llvm-mingw-20251104-ucrt-ubuntu-22.04-x86_64 \
+            --output _work/windows-target-data
+          export WINEPREFIX="$GITHUB_WORKSPACE/_work/wine-prefix" WINEARCH=win64
+          xvfb-run -a bash -e -o pipefail -c '
+            wine _work/compiler/bin/clang.exe --version
+            wine _work/python/python.exe -B dev/windows_arm32/toolchain/check_compiler.py \
+              _work/compiler/bin/clang.exe \
+              --sysroot _work/windows-target-data \
+              --engine engine/src/flutter --output _work/compiler-regression
+          '
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-arm32-windows-compiler-execution-proof
+          path: |
+            _work/compiler-regression
+            _work/windows-target-data/target-sysroot-provenance.json
+          if-no-files-found: error
+
+  windows_snapshot:
+    if: ${{ inputs.windows_snapshot }}
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    timeout-minutes: 90
+    env:
+      TMPDIR: ${{ github.workspace }}/_work/tmp
+      DEPOT_TOOLS_UPDATE: '0'
+      GIT_CONFIG_COUNT: '1'
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: ${{ github.workspace }}
+    steps:
+      - name: Prepare Ubuntu amd64 container
+        run: |
+          test "$(uname -m)" = x86_64
+          mkdir -p "$TMPDIR"
+          export DEBIAN_FRONTEND=noninteractive
+          dpkg --add-architecture i386
+          apt-get update
+          apt-get install -y --no-install-recommends curl ca-certificates python3 \
+            xz-utils gnupg xvfb xauth imagemagick git cmake ninja-build build-essential pkg-config python3-venv unzip zip libglib2.0-dev libfreetype-dev
+          mkdir -p /etc/apt/keyrings
+          curl --fail --location --retry 3 https://dl.winehq.org/wine-builds/winehq.key \
+            --output /etc/apt/keyrings/winehq.asc
+          echo 'd965d646defe94b3dfba6d5b4406900ac6c81065428bf9d9303ad7a72ee8d1b8  /etc/apt/keyrings/winehq.asc' | sha256sum --check
+          gpg --batch --dearmor --output /etc/apt/keyrings/winehq-archive.key /etc/apt/keyrings/winehq.asc
+          curl --fail --location --retry 3 \
+            https://dl.winehq.org/wine-builds/ubuntu/dists/noble/winehq-noble.sources \
+            --output /etc/apt/sources.list.d/winehq-noble.sources
+          echo 'b5962429ece1f831c9f713c13f9f0d26bb367117ef56706648ff385f004779fb  /etc/apt/sources.list.d/winehq-noble.sources' | sha256sum --check
+          apt-get update
+          apt-get install -y --install-recommends winehq-stable=11.0.0.0~noble-1
+          # Supply Wine 11's standard addons before prefix initialization;
+          # otherwise its interactive Mono installer blocks unattended tests.
+          # SHA-256 values come from Wine 11.0 dlls/appwiz.cpl/addons.c.
+          mkdir -p /opt/wine/mono /opt/wine/gecko
+          curl --fail --location --retry 3 \
+            https://dl.winehq.org/wine/wine-mono/10.4.1/wine-mono-10.4.1-x86.msi \
+            --output /opt/wine/mono/wine-mono-10.4.1-x86.msi
+          echo '071f4b2887e1c97a11d791ff3d65be9429eed6dec4c2708888bfd546ba358e23  /opt/wine/mono/wine-mono-10.4.1-x86.msi' | sha256sum --check
+          curl --fail --location --retry 3 \
+            https://dl.winehq.org/wine/wine-gecko/2.47.4/wine-gecko-2.47.4-x86.msi \
+            --output /opt/wine/gecko/wine-gecko-2.47.4-x86.msi
+          echo '26cecc47706b091908f7f814bddb074c61beb8063318e9efc5a7f789857793d6  /opt/wine/gecko/wine-gecko-2.47.4-x86.msi' | sha256sum --check
+          curl --fail --location --retry 3 \
+            https://dl.winehq.org/wine/wine-gecko/2.47.4/wine-gecko-2.47.4-x86_64.msi \
+            --output /opt/wine/gecko/wine-gecko-2.47.4-x86_64.msi
+          echo 'e590b7d988a32d6aa4cf1d8aa3aa3d33766fdd4cf4c89c2dcc2095ecb28d066f  /opt/wine/gecko/wine-gecko-2.47.4-x86_64.msi' | sha256sum --check
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: ${{ inputs.snapshot_generator_run_id == '' }}
+        with:
+          name: windows-arm32-compiler-linux-x64
+          run-id: ${{ inputs.snapshot_compiler_run_id }}
+          github-token: ${{ github.token }}
+          path: _work/compiler-input
+      - name: Verify common compiler and sync the pinned engine sources
+        if: ${{ inputs.snapshot_generator_run_id == '' }}
+        run: |
+          mkdir -p _work/compiler
+          cd _work/compiler-input
+          sha256sum --check windows-arm32-compiler-linux-x64.tar.gz.sha256
+          tar -xzf windows-arm32-compiler-linux-x64.tar.gz -C ../compiler
+          cd ../..
+          git clone --filter=blob:none --no-checkout \
+            https://chromium.googlesource.com/chromium/tools/depot_tools.git _work/depot_tools
+          git -C _work/depot_tools checkout --detach b41883b1dc5a92bc7a53d69e27cfbfd320fd52ca
+          export PATH="$GITHUB_WORKSPACE/_work/depot_tools:$PATH"
+          python3 dev/windows_arm32/prepare_engine_checkout.py --windows-inputs
+      - name: Prepare isolated Windows x64 development headers and runtime
+        if: ${{ inputs.snapshot_generator_run_id == '' }}
+        run: |
+          archive=llvm-mingw-20251104-ucrt-ubuntu-22.04-x86_64.tar.xz
+          curl --fail --location --retry 3 \
+            "https://github.com/mstorsjo/llvm-mingw/releases/download/20251104/$archive" \
+            --output "_work/$archive"
+          echo "3aed6fa47be909884cb3e5634d6b7254604d7104832d6312f8435fb23d5a9bab  _work/$archive" | sha256sum --check
+          tar -xf "_work/$archive" -C _work
+          python3 dev/windows_arm32/toolchain/prepare_windows_sdk.py \
+            --output _work/windows-sdk --mingw-sysroot _work/llvm-mingw-20251104-ucrt-ubuntu-22.04-x86_64
+          python3 -B - <<'PYCONFIG'
+          import json, subprocess
+          from pathlib import Path
+          work = Path('_work').resolve()
+          compiler = work / 'compiler/bin/clang'
+          config = {
+              'compiler': str(compiler), 'llvmBin': str(work / 'compiler/bin'),
+              'sysroot': str(work / 'llvm-mingw-20251104-ucrt-ubuntu-22.04-x86_64'),
+              'resourceDir': subprocess.check_output([str(compiler), '-print-resource-dir'], text=True).strip(),
+              'runtimeResourceDir': str(work / 'llvm-mingw-20251104-ucrt-ubuntu-22.04-x86_64/lib/clang/21'),
+              'systemIncludeDirs': [str(work / 'windows-sdk/include')],
+          }
+          (work / 'snapshot-toolchain.json').write_text(json.dumps(config, indent=2) + '\n')
+          PYCONFIG
+      - name: Build the full Windows generator from current Dart source
+        if: ${{ inputs.snapshot_generator_run_id == '' }}
+        run: |
+          python3 dev/windows_arm32/build_windows_snapshot.py \
+            --output _work/windows-snapshot --toolchain-config _work/snapshot-toolchain.json --jobs 2
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: ${{ inputs.snapshot_generator_run_id != '' }}
+        with:
+          name: windows-arm32-snapshot-windows-x64
+          run-id: ${{ inputs.snapshot_generator_run_id }}
+          github-token: ${{ github.token }}
+          path: _work/windows-snapshot
+      - name: Verify generator matches the current source manifests
+        run: |
+          python3 -B - <<'PYAUDIT'
+          import hashlib, json
+          from pathlib import Path
+          from dev.windows_arm32.sdk_hosts import select_host, verify_native_host
+          output = Path('_work/windows-snapshot')
+          record = json.loads((output / 'snapshot-provenance.json').read_text())
+          expected = {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+                      for p in sorted(Path('dev/windows_arm32/patches').glob('*-source-manifest.json'))}
+          image = output / 'build/gen_snapshot.exe'
+          host_paths = ['dev/windows_arm32/build_windows_snapshot.py',
+                        *('dev/windows_arm32/toolchain/' + name for name in (
+                            'windows_snapshot_driver.py', 'gnu_driver.py', 'msvc_options.py', 'windows_header_vfs.py'))]
+          host_inputs = {name: hashlib.sha256(Path(name).read_bytes()).hexdigest() for name in host_paths}
+          if record.get('hostBuildInputs') != host_inputs:
+              raise SystemExit('Snapshot host compiler driver/configuration differs from this source build')
+          verify_native_host(image, select_host('windows-x64'))
+          if (not record['sourceBuilt'] or record['host'] != 'windows-x64' or
+              record['dartTargetArchitecture'] != 'arm' or record['sourceManifests'] != expected or
+              hashlib.sha256(image.read_bytes()).hexdigest() != record['generatorSha256']):
+              raise SystemExit('Snapshot generator differs from the current source build')
+          PYAUDIT
+      - name: Execute the native Windows generator under Wine
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/_work/tmp"
+          export TMPDIR="$GITHUB_WORKSPACE/_work/tmp"
+          xvfb-run -a python3 -B - <<'PYVERIFY'
+          import json, os, subprocess
+          from pathlib import Path
+          output = Path('_work/windows-snapshot')
+          result = subprocess.run(['wine', str((output / 'build/gen_snapshot.exe').resolve()), '--help'],
+                                  env=dict(os.environ, WINEPREFIX=str(Path('_work/wine-snapshot').resolve()), WINEDEBUG='-all'),
+                                  capture_output=True, text=True, timeout=120)
+          (output / 'runtime-stdout.log').write_text(result.stdout)
+          (output / 'runtime-stderr.log').write_text(result.stderr)
+          if result.returncode != 0 or 'Usage: gen_snapshot' not in result.stdout + result.stderr:
+              raise SystemExit('Native Windows snapshot generator did not execute successfully')
+          proof = json.loads((output / 'snapshot-provenance.json').read_text())
+          proof.update(runtimeExecutionVerified=True, runtimeVerification='Wine 11 --help',
+                       fullSdkArm32AppBuildVerified=False)
+          (output / 'snapshot-provenance.json').write_text(json.dumps(proof, indent=2) + '\n')
+          PYVERIFY
+      - name: Prepare checksum-pinned official Linux Dart bootstrap for the AOT input
+        if: ${{ inputs.snapshot_aot }}
+        run: |
+          mkdir -p _work/aot-bootstrap
+          curl --fail --location --retry 3 \
+            https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.38.10-stable.tar.xz \
+            --output _work/aot-bootstrap.tar.xz
+          echo '385e2629a0a585a835f351ca1605d2c7996377ce2fa16e68296e8fc9a78ccf7a  _work/aot-bootstrap.tar.xz' | sha256sum --check
+          tar -xJf _work/aot-bootstrap.tar.xz --strip-components=3 -C _work/aot-bootstrap \
+            flutter/bin/cache/dart-sdk
+          rm _work/aot-bootstrap.tar.xz
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: ${{ inputs.snapshot_aot }}
+        with:
+          name: windows-arm32-engine-rt-linux-x64
+          run-id: ${{ inputs.snapshot_frontend_run_id }}
+          github-token: ${{ github.token }}
+          path: _work/aot-engine-input
+      - name: Stage the matching source frontend and ARM32 platform metadata
+        if: ${{ inputs.snapshot_aot }}
+        run: |
+          mkdir -p _work/aot-platform
+          (cd _work/aot-engine-input && sha256sum --check windows-arm32-engine-rt-linux-x64.tar.gz.sha256)
+          tar -xzf _work/aot-engine-input/windows-arm32-engine-rt-linux-x64.tar.gz -C _work/aot-platform \
+            ./frontend_server_aot.dart.snapshot ./frontend-source-provenance.json \
+            ./flutter_patched_sdk/platform_strong.dill ./flutter_patched_sdk/vm_outline_strong.dill \
+            ./engine-build-provenance.json
+          python3 -B - <<'PYPLATFORM'
+          import json, hashlib
+          from pathlib import Path
+          root = Path('_work/aot-platform')
+          proof = json.loads((root / 'engine-build-provenance.json').read_text())
+          digest = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
+          if proof['sourceManifests']['dart-source-manifest.json'] != digest(Path('dev/windows_arm32/patches/dart-source-manifest.json')):
+              raise SystemExit('Platform ABI metadata does not match the current Dart sources')
+          for name in ('platform_strong.dill', 'vm_outline_strong.dill'):
+              path = root / 'flutter_patched_sdk' / name
+              if digest(path) != proof['families']['rt']['artifacts']['flutter_patched_sdk/' + name]['sha256']:
+                  raise SystemExit('Source-built platform dill changed')
+          PYPLATFORM
+      - name: Exercise the Windows generator with real ARM32 AOT output
+        if: ${{ inputs.snapshot_aot }}
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/_work/tmp"
+          export TMPDIR="$GITHUB_WORKSPACE/_work/tmp"
+          xvfb-run -a python3 -B dev/windows_arm32/check_windows_snapshot_aot.py \
+            --generator _work/windows-snapshot/build/gen_snapshot.exe \
+            --dart _work/aot-bootstrap/dart-sdk/bin/dart --output _work/windows-snapshot/aot-check \
+            --frontend-server _work/aot-platform/frontend_server_aot.dart.snapshot \
+            --patched-sdk _work/aot-platform/flutter_patched_sdk
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: windows-arm32-snapshot-windows-x64
+          path: |
+            _work/windows-snapshot/build/gen_snapshot.exe
+            _work/windows-snapshot/snapshot-provenance.json
+            _work/windows-snapshot/build/args.gn
+            _work/windows-snapshot/runtime-*.log
+            _work/windows-snapshot/aot-check/aot-verification.json
+            _work/windows-snapshot/aot-check/aot-*.log
+            _work/windows-snapshot/aot-check/snapshot-proof.so
+          if-no-files-found: warn
+
+  windows_msix:
+    if: ${{ inputs.windows_msix }}
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    timeout-minutes: 60
+    env:
+      TMPDIR: ${{ github.workspace }}/_work/tmp
+      GIT_CONFIG_COUNT: '1'
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: ${{ github.workspace }}
+    steps:
+      - name: Prepare Ubuntu amd64 container
+        run: |
+          test "$(uname -m)" = x86_64
+          mkdir -p "$TMPDIR"
+          export DEBIAN_FRONTEND=noninteractive
+          dpkg --add-architecture i386
+          apt-get update
+          apt-get install -y --no-install-recommends curl ca-certificates python3 \
+            xz-utils gnupg xvfb xauth imagemagick git cmake ninja-build build-essential pkg-config python3-venv unzip zip libglib2.0-dev libfreetype-dev
+          mkdir -p /etc/apt/keyrings
+          curl --fail --location --retry 3 https://dl.winehq.org/wine-builds/winehq.key \
+            --output /etc/apt/keyrings/winehq.asc
+          echo 'd965d646defe94b3dfba6d5b4406900ac6c81065428bf9d9303ad7a72ee8d1b8  /etc/apt/keyrings/winehq.asc' | sha256sum --check
+          gpg --batch --dearmor --output /etc/apt/keyrings/winehq-archive.key /etc/apt/keyrings/winehq.asc
+          curl --fail --location --retry 3 \
+            https://dl.winehq.org/wine-builds/ubuntu/dists/noble/winehq-noble.sources \
+            --output /etc/apt/sources.list.d/winehq-noble.sources
+          echo 'b5962429ece1f831c9f713c13f9f0d26bb367117ef56706648ff385f004779fb  /etc/apt/sources.list.d/winehq-noble.sources' | sha256sum --check
+          apt-get update
+          apt-get install -y --install-recommends winehq-stable=11.0.0.0~noble-1
+          # Supply Wine 11's standard addons before prefix initialization;
+          # otherwise its interactive Mono installer blocks unattended tests.
+          # SHA-256 values come from Wine 11.0 dlls/appwiz.cpl/addons.c.
+          mkdir -p /opt/wine/mono /opt/wine/gecko
+          curl --fail --location --retry 3 \
+            https://dl.winehq.org/wine/wine-mono/10.4.1/wine-mono-10.4.1-x86.msi \
+            --output /opt/wine/mono/wine-mono-10.4.1-x86.msi
+          echo '071f4b2887e1c97a11d791ff3d65be9429eed6dec4c2708888bfd546ba358e23  /opt/wine/mono/wine-mono-10.4.1-x86.msi' | sha256sum --check
+          curl --fail --location --retry 3 \
+            https://dl.winehq.org/wine/wine-gecko/2.47.4/wine-gecko-2.47.4-x86.msi \
+            --output /opt/wine/gecko/wine-gecko-2.47.4-x86.msi
+          echo '26cecc47706b091908f7f814bddb074c61beb8063318e9efc5a7f789857793d6  /opt/wine/gecko/wine-gecko-2.47.4-x86.msi' | sha256sum --check
+          curl --fail --location --retry 3 \
+            https://dl.winehq.org/wine/wine-gecko/2.47.4/wine-gecko-2.47.4-x86_64.msi \
+            --output /opt/wine/gecko/wine-gecko-2.47.4-x86_64.msi
+          echo 'e590b7d988a32d6aa4cf1d8aa3aa3d33766fdd4cf4c89c2dcc2095ecb28d066f  /opt/wine/gecko/wine-gecko-2.47.4-x86_64.msi' | sha256sum --check
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: ${{ inputs.msix_packager_run_id == '' }}
+        with:
+          name: windows-arm32-compiler-linux-x64
+          run-id: ${{ inputs.snapshot_compiler_run_id }}
+          github-token: ${{ github.token }}
+          path: _work/compiler-input
+      - name: Extract the source-built common compiler
+        if: ${{ inputs.msix_packager_run_id == '' }}
+        run: |
+          mkdir -p _work/compiler
+          cd _work/compiler-input
+          sha256sum --check windows-arm32-compiler-linux-x64.tar.gz.sha256
+          tar -xzf windows-arm32-compiler-linux-x64.tar.gz -C ../compiler
+      - name: Prepare isolated Windows x64 development headers and runtime
+        if: ${{ inputs.msix_packager_run_id == '' }}
+        run: |
+          archive=llvm-mingw-20251104-ucrt-ubuntu-22.04-x86_64.tar.xz
+          curl --fail --location --retry 3 \
+            "https://github.com/mstorsjo/llvm-mingw/releases/download/20251104/$archive" \
+            --output "_work/$archive"
+          echo "3aed6fa47be909884cb3e5634d6b7254604d7104832d6312f8435fb23d5a9bab  _work/$archive" | sha256sum --check
+          tar -xf "_work/$archive" -C _work
+          python3 dev/windows_arm32/toolchain/prepare_windows_sdk.py \
+            --output _work/windows-sdk --mingw-sysroot _work/llvm-mingw-20251104-ucrt-ubuntu-22.04-x86_64
+          python3 -B - <<'PYCONFIG'
+          import json, subprocess
+          from pathlib import Path
+          work = Path('_work').resolve()
+          compiler = work / 'compiler/bin/clang'
+          config = {
+              'compiler': str(compiler), 'llvmBin': str(work / 'compiler/bin'),
+              'sysroot': str(work / 'llvm-mingw-20251104-ucrt-ubuntu-22.04-x86_64'),
+              'resourceDir': subprocess.check_output([str(compiler), '-print-resource-dir'], text=True).strip(),
+              'runtimeResourceDir': str(work / 'llvm-mingw-20251104-ucrt-ubuntu-22.04-x86_64/lib/clang/21'),
+              'systemIncludeDirs': [str(work / 'windows-sdk/include')],
+          }
+          (work / 'snapshot-toolchain.json').write_text(json.dumps(config, indent=2) + '\n')
+          PYCONFIG
+      - name: Install the pinned CMake version required by upstream MSIX
+        if: ${{ inputs.msix_packager_run_id == '' }}
+        run: |
+          curl --fail --location --retry 3 \
+            https://github.com/Kitware/CMake/releases/download/v3.31.9/cmake-3.31.9-linux-x86_64.tar.gz \
+            --output _work/cmake.tar.gz
+          echo '312d78e0b7c5c9b4a97a87a46c3e525aa84895fe8135c238c4616bba73dc9518  _work/cmake.tar.gz' | sha256sum -c -
+          mkdir -p _work/cmake
+          tar -xzf _work/cmake.tar.gz --strip-components=1 -C _work/cmake
+          echo "$GITHUB_WORKSPACE/_work/cmake/bin" >> "$GITHUB_PATH"
+      - name: Build full Windows MSIX package, bundle and XML/signature validation support
+        if: ${{ inputs.msix_packager_run_id == '' }}
+        run: |
+          python3 dev/windows_arm32/toolchain/build_windows_msix.py \
+            --output _work/windows-msix --toolchain-config _work/snapshot-toolchain.json \
+            --sdk-package _work/windows-sdk/downloads/windows-sdk-cpp-10.0.22621.1.nupkg \
+            --xml-parser '${{ inputs.msix_xml_parser }}' --jobs 2
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: ${{ inputs.msix_packager_run_id != '' }}
+        with:
+          name: windows-arm32-msix-windows-x64
+          run-id: ${{ inputs.msix_packager_run_id }}
+          github-token: ${{ github.token }}
+          path: _work/msix-input
+      - name: Verify the existing source-built Windows packager for runtime tests
+        if: ${{ inputs.msix_packager_run_id != '' }}
+        run: |
+          mkdir -p _work/windows-msix/distribution
+          (cd _work/msix-input && sha256sum --check windows-arm32-msix-windows-x64.tar.gz.sha256)
+          tar -xzf _work/msix-input/windows-arm32-msix-windows-x64.tar.gz -C _work/windows-msix/distribution
+          python3 -B - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          root = Path('_work/windows-msix/distribution')
+          record = json.loads((root / 'msix-provenance.json').read_text())
+          if '-DXML_PARSER=${{ inputs.msix_xml_parser }}' not in record['cmakeFeatureSettings']:
+              raise SystemExit('Existing packager uses another upstream XML backend')
+          if record.get('sourceBuilt') is not True or record.get('systemLibrariesCopied') is not False:
+              raise SystemExit('Select an audited source-built Windows packager')
+          for name, sha in record['files'].items():
+              if hashlib.sha256((root / name).read_bytes()).hexdigest() != sha:
+                  raise SystemExit('Windows MSIX distribution file changed: ' + name)
+          PY
+      - name: Verify native Windows CLI execution and Unicode relocation
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/_work/tmp"
+          export TMPDIR="$GITHUB_WORKSPACE/_work/tmp"
+          xvfb-run -a python3 -B - <<'PYVERIFY'
+          import json, os, subprocess
+          from pathlib import Path
+          root = Path('_work/windows-msix')
+          distribution = root / 'distribution'
+          moved = root / 'MSIX moved 日本語'
+          distribution.rename(moved)
+          result = subprocess.run(['wine', str((moved / 'bin/makemsix.exe').resolve()), '-?'],
+              env=dict(os.environ, WINEPREFIX=str(Path('_work/wine-msix').resolve()), WINEDEBUG='-all'),
+              capture_output=True, text=True, timeout=120)
+          (root / 'runtime-stdout.log').write_text(result.stdout)
+          (root / 'runtime-stderr.log').write_text(result.stderr)
+          if result.returncode != 0:
+              raise SystemExit('Native Windows MSIX CLI failed after relocation')
+          report = json.loads((moved / 'msix-provenance.json').read_text())
+          report.update(runtimeExecutionVerified=True, runtimeVerification='Wine 11 CLI help after Unicode relocation',
+                        fullApplicationPackagingVerified=False)
+          (moved / 'msix-provenance.json').write_text(json.dumps(report, indent=2) + '\n')
+          moved.rename(distribution)
+          PYVERIFY
+          tar -czf _work/windows-arm32-msix-windows-x64.tar.gz -C _work/windows-msix/distribution .
+          (cd _work && sha256sum windows-arm32-msix-windows-x64.tar.gz > windows-arm32-msix-windows-x64.tar.gz.sha256)
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: windows-arm32-physical-test-bundles
+          run-id: ${{ inputs.msix_fixture_run_id }}
+          github-token: ${{ github.token }}
+          path: _work/phone-fixture
+      - name: Install genuine Microsoft XML APIs only into the isolated Wine test OS
+        if: ${{ inputs.msix_xml_parser == 'msxml6' }}
+        env:
+          WINEPREFIX: ${{ github.workspace }}/_work/wine-msix
+          WINEDLLOVERRIDES: msxml6=n,b
+          WINEDEBUG: '-all'
+        run: |
+          apt-get install -y --no-install-recommends cabextract
+          mkdir -p _work/msxml6/installer _work/msxml6/payload
+          curl --fail --location --retry 3 \
+            https://download.microsoft.com/download/2/7/7/277681BE-4048-4A58-ABBA-259C465B1699/msxml6-KB2957482-enu-amd64.exe \
+            --output _work/msxml6/installer.exe
+          echo '260cd870851ffc3c6d10b71691f134e20d8d03ac26073bb36951eacb7aa85897  _work/msxml6/installer.exe' | sha256sum --check
+          cabextract -q -d _work/msxml6/installer _work/msxml6/installer.exe
+          cabextract -q -d _work/msxml6/payload _work/msxml6/installer/msxml6.msi
+          python3 -B - <<'PY'
+          from pathlib import Path
+          from dev.windows_arm32.sdk_hosts import select_host, verify_native_host
+          root = Path('_work/msxml6/payload')
+          for name in ('msxml6.dll', 'msxml6r.dll'):
+              verify_native_host(root / (name + '.1ECC0691_D2EB_4A33_9CBF_5487E5CB17DB'), select_host('windows-x64'))
+          PY
+          # Wine's builtin MSXML uses libxml2's different XSD regexp grammar.
+          # Keep the original Windows parser and complete validation enabled.
+          export WINEPREFIX="$PWD/_work/wine-msix"
+          # Replace prefix-local files rather than following builtin DLL links.
+          cp --remove-destination _work/msxml6/payload/msxml6.dll.1ECC0691_D2EB_4A33_9CBF_5487E5CB17DB "$WINEPREFIX/drive_c/windows/system32/msxml6.dll"
+          cp --remove-destination _work/msxml6/payload/msxml6r.dll.1ECC0691_D2EB_4A33_9CBF_5487E5CB17DB "$WINEPREFIX/drive_c/windows/system32/msxml6r.dll"
+          WINEDEBUG=+loaddll,+module,+seh xvfb-run -a wine 'C:\windows\system32\regsvr32.exe' /s 'C:\windows\system32\msxml6.dll' 2>&1 | tee _work/msxml6/register-native.log
+          python3 -B - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          root = Path('_work/msxml6')
+          files = {name: hashlib.sha256(path.read_bytes()).hexdigest()
+              for name, path in ((n, Path('_work/wine-msix/drive_c/windows/system32') / n)
+                  for n in ('msxml6.dll', 'msxml6r.dll'))}
+          (root / 'ci-runtime-input.json').write_text(json.dumps({
+              'source': 'Microsoft MSXML6 SP2 KB2957482 official redistributable',
+              'installerSha256': '260cd870851ffc3c6d10b71691f134e20d8d03ac26073bb36951eacb7aa85897',
+              'wineOsFiles': files, 'systemLibrariesCopiedToSdk': False,
+              'xmlValidationDisabled': False}, indent=2) + '\n')
+          PY
+      - name: Verify real Phone packaging with unchanged application contents
+        env:
+          WINEDLLOVERRIDES: msxml6=n,b
+        run: |
+          python3 -B - <<'PY'
+          import hashlib
+          from pathlib import Path
+          root = Path('_work/phone-fixture')
+          entries = [line.split() for line in (root / 'physical-bundles.sha256').read_text().splitlines()]
+          matches = [sha for sha, name in entries if Path(name).name == 'physical-phone.tar.gz']
+          if len(matches) != 1 or hashlib.sha256((root / 'physical-phone.tar.gz').read_bytes()).hexdigest() != matches[0]:
+              raise SystemExit('Phone packaging fixture checksum failed')
+          PY
+          xml_args=()
+          if test -f _work/msxml6/ci-runtime-input.json; then
+            xml_args=(--xml-runtime-record _work/msxml6/ci-runtime-input.json)
+          fi
+          xvfb-run -a python3 -B dev/windows_arm32/check_windows_msix.py \
+            --distribution _work/windows-msix/distribution \
+            --fixture _work/phone-fixture/physical-phone.tar.gz \
+            --wine-prefix _work/wine-msix \
+            "${xml_args[@]}" \
+            --output '_work/Phone packaging 日本語'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: windows-arm32-msix-windows-x64
+          path: |
+            _work/windows-arm32-msix-windows-x64.tar.gz
+            _work/windows-arm32-msix-windows-x64.tar.gz.sha256
+            _work/windows-msix/distribution/msix-provenance.json
+            _work/windows-msix/runtime-*.log
+            _work/Phone packaging 日本語/verification.json
+            _work/Phone packaging 日本語/pack-*.log
+            _work/Phone packaging 日本語/unpack-*.log
+            _work/Phone packaging 日本語/signature-required-*.log
+            _work/msxml6/ci-runtime-input.json
+            _work/msxml6/register-native.log
+          if-no-files-found: warn
+
+  frontend_generators:
+    if: ${{ inputs.frontend_generators }}
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        target_host: [linux-x64, windows-x64, macos-x64, macos-arm64]
+    env:
+      DEPOT_TOOLS_UPDATE: '0'
+      GIT_CONFIG_COUNT: '1'
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: ${{ github.workspace }}
+    steps:
+      - name: Prepare native Ubuntu amd64 build container
+        run: |
+          test "$(uname -m)" = x86_64
+          mkdir -p "$GITHUB_WORKSPACE/_work/tmp"
+          echo "TMPDIR=$GITHUB_WORKSPACE/_work/tmp" >> "$GITHUB_ENV"
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential cmake ninja-build git curl \
+            ca-certificates python3 python3-pip python3-venv pkg-config xz-utils zip unzip \
+            libxml2-dev libzstd-dev zlib1g-dev libssl-dev liblzma-dev libfreetype-dev
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: windows-arm32-compiler-linux-x64
+          run-id: ${{ inputs.snapshot_compiler_run_id }}
+          github-token: ${{ github.token }}
+          path: _work/compiler-input
+      - name: Verify common compiler and sync the pinned engine sources
+        run: |
+          mkdir -p _work/compiler
+          cd _work/compiler-input
+          sha256sum --check windows-arm32-compiler-linux-x64.tar.gz.sha256
+          tar -xzf windows-arm32-compiler-linux-x64.tar.gz -C ../compiler
+          cd ../..
+          git clone --filter=blob:none --no-checkout \
+            https://chromium.googlesource.com/chromium/tools/depot_tools.git _work/depot_tools
+          git -C _work/depot_tools checkout --detach b41883b1dc5a92bc7a53d69e27cfbfd320fd52ca
+          export PATH="$GITHUB_WORKSPACE/_work/depot_tools:$PATH"
+          python3 dev/windows_arm32/prepare_engine_checkout.py --windows-inputs
+      - name: Build the matching frontend cross generator from current Dart source
+        run: |
+          python3 dev/windows_arm32/build_frontend_generator.py \
+            --target-host '${{ matrix.target_host }}' --compiler-root _work/compiler \
+            --output _work/frontend-generator --jobs 2
+      - name: Verify Linux executable and record destination frontend scope
+        run: |
+          _work/frontend-generator/build/gen_snapshot --help
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: windows-arm32-frontend-generator-${{ matrix.target_host }}
+          path: |
+            _work/frontend-generator/build/gen_snapshot
+            _work/frontend-generator/build/args.gn
+            _work/frontend-generator/frontend-generator-provenance.json
+          if-no-files-found: warn
+
+  frontend_snapshots:
+    if: ${{ inputs.frontend_snapshots }}
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        target_host: [linux-x64, windows-x64, macos-x64, macos-arm64]
+    env:
+      DEPOT_TOOLS_UPDATE: '0'
+      GIT_CONFIG_COUNT: '1'
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: ${{ github.workspace }}
+    steps:
+      - name: Prepare Ubuntu amd64 source frontend build container
+        run: |
+          test "$(uname -m)" = x86_64
+          mkdir -p "$GITHUB_WORKSPACE/_work/tmp"
+          echo "TMPDIR=$GITHUB_WORKSPACE/_work/tmp" >> "$GITHUB_ENV"
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends git curl ca-certificates python3 xz-utils
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: windows-arm32-frontend-generator-${{ matrix.target_host }}
+          run-id: ${{ inputs.frontend_generator_run_id }}
+          github-token: ${{ github.token }}
+          path: _work/frontend-generator
+      - name: Sync the matching Dart source and stage the official Linux bootstrap
+        run: |
+          test -n '${{ inputs.frontend_generator_run_id }}'
+          git clone --filter=blob:none --no-checkout \
+            https://chromium.googlesource.com/chromium/tools/depot_tools.git _work/depot_tools
+          git -C _work/depot_tools checkout --detach b41883b1dc5a92bc7a53d69e27cfbfd320fd52ca
+          export PATH="$GITHUB_WORKSPACE/_work/depot_tools:$PATH"
+          python3 dev/windows_arm32/prepare_engine_checkout.py --windows-inputs
+          mkdir -p _work/bootstrap
+          curl --fail --location --retry 3 \
+            https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.38.10-stable.tar.xz \
+            --output _work/bootstrap.tar.xz
+          echo '385e2629a0a585a835f351ca1605d2c7996377ce2fa16e68296e8fc9a78ccf7a  _work/bootstrap.tar.xz' | sha256sum --check
+          tar -xJf _work/bootstrap.tar.xz --strip-components=3 -C _work/bootstrap flutter/bin/cache/dart-sdk
+          rm _work/bootstrap.tar.xz
+          chmod +x _work/frontend-generator/build/gen_snapshot
+      - name: Generate current-source platform and destination frontend AOT
+        run: |
+          python3 dev/windows_arm32/build_frontend_cross.py \
+            --target-host '${{ matrix.target_host }}' --dart _work/bootstrap/dart-sdk/bin/dart \
+            --generator _work/frontend-generator/build/gen_snapshot \
+            --generator-provenance _work/frontend-generator/frontend-generator-provenance.json \
+            --output _work/frontend
+      - name: Check Linux destination snapshot on the native bootstrap runtime
+        if: ${{ matrix.target_host == 'linux-x64' }}
+        run: |
+          python3 -B - <<'PYRUNTIME'
+          import json, subprocess
+          from pathlib import Path
+          output = Path('_work/frontend').resolve()
+          source = output / 'proof.dart'
+          source.write_text('void main() { print("frontend 日本語"); }\n')
+          packages = output / 'package_config.json'
+          packages.write_text('{"configVersion":2,"packages":[]}\n')
+          result = subprocess.run([str(Path('_work/bootstrap/dart-sdk/bin/dartaotruntime').resolve()),
+              str(output / 'frontend_server_aot.dart.snapshot'), '--target=vm', '--aot', '--tfa',
+              '--target-os=linux', '--platform=' + str(output / 'vm_platform.dill'),
+              '--sdk-root=' + str(Path('_work/bootstrap/dart-sdk').resolve()) + '/',
+              '--packages=' + str(packages), '--output-dill=' + str(output / 'proof.dill'), str(source)],
+              capture_output=True, text=True, timeout=180)
+          (output / 'runtime-compile.log').write_text(result.stdout + result.stderr)
+          if result.returncode != 0 or not (output / 'proof.dill').is_file():
+              raise SystemExit('Destination Linux frontend did not compile the fixture')
+          file = output / 'frontend-source-provenance.json'
+          proof = json.loads(file.read_text())
+          proof.update(destinationFrontendRuntimeVerified=True,
+                       runtimeVerification='Official matching Linux dartaotruntime compiled a VM AOT kernel')
+          file.write_text(json.dumps(proof, indent=2) + '\n')
+          PYRUNTIME
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: windows-arm32-frontend-${{ matrix.target_host }}
+          path: |
+            _work/frontend/frontend_server_aot.dart.snapshot
+            _work/frontend/frontend-source-provenance.json
+            _work/frontend/*-build.log
+            _work/frontend/runtime-compile.log
+          if-no-files-found: warn
+
+  windows_frontend_runtime:
+    if: ${{ inputs.windows_frontend_runtime }}
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    timeout-minutes: 45
+    env:
+      TMPDIR: ${{ github.workspace }}/_work/tmp
+    steps:
+      - name: Prepare Ubuntu amd64 container
+        run: |
+          test "$(uname -m)" = x86_64
+          mkdir -p "$TMPDIR"
+          export DEBIAN_FRONTEND=noninteractive
+          dpkg --add-architecture i386
+          apt-get update
+          apt-get install -y --no-install-recommends curl ca-certificates python3 \
+            xz-utils gnupg xvfb xauth imagemagick
+          mkdir -p /etc/apt/keyrings
+          curl --fail --location --retry 3 https://dl.winehq.org/wine-builds/winehq.key \
+            --output /etc/apt/keyrings/winehq.asc
+          echo 'd965d646defe94b3dfba6d5b4406900ac6c81065428bf9d9303ad7a72ee8d1b8  /etc/apt/keyrings/winehq.asc' | sha256sum --check
+          gpg --batch --dearmor --output /etc/apt/keyrings/winehq-archive.key /etc/apt/keyrings/winehq.asc
+          curl --fail --location --retry 3 \
+            https://dl.winehq.org/wine-builds/ubuntu/dists/noble/winehq-noble.sources \
+            --output /etc/apt/sources.list.d/winehq-noble.sources
+          echo 'b5962429ece1f831c9f713c13f9f0d26bb367117ef56706648ff385f004779fb  /etc/apt/sources.list.d/winehq-noble.sources' | sha256sum --check
+          apt-get update
+          apt-get install -y --install-recommends winehq-stable=11.0.0.0~noble-1
+          # Supply Wine 11's standard addons before prefix initialization;
+          # otherwise its interactive Mono installer blocks unattended tests.
+          # SHA-256 values come from Wine 11.0 dlls/appwiz.cpl/addons.c.
+          mkdir -p /opt/wine/mono /opt/wine/gecko
+          curl --fail --location --retry 3 \
+            https://dl.winehq.org/wine/wine-mono/10.4.1/wine-mono-10.4.1-x86.msi \
+            --output /opt/wine/mono/wine-mono-10.4.1-x86.msi
+          echo '071f4b2887e1c97a11d791ff3d65be9429eed6dec4c2708888bfd546ba358e23  /opt/wine/mono/wine-mono-10.4.1-x86.msi' | sha256sum --check
+          curl --fail --location --retry 3 \
+            https://dl.winehq.org/wine/wine-gecko/2.47.4/wine-gecko-2.47.4-x86.msi \
+            --output /opt/wine/gecko/wine-gecko-2.47.4-x86.msi
+          echo '26cecc47706b091908f7f814bddb074c61beb8063318e9efc5a7f789857793d6  /opt/wine/gecko/wine-gecko-2.47.4-x86.msi' | sha256sum --check
+          curl --fail --location --retry 3 \
+            https://dl.winehq.org/wine/wine-gecko/2.47.4/wine-gecko-2.47.4-x86_64.msi \
+            --output /opt/wine/gecko/wine-gecko-2.47.4-x86_64.msi
+          echo 'e590b7d988a32d6aa4cf1d8aa3aa3d33766fdd4cf4c89c2dcc2095ecb28d066f  /opt/wine/gecko/wine-gecko-2.47.4-x86_64.msi' | sha256sum --check
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: windows-arm32-frontend-windows-x64
+          run-id: ${{ inputs.frontend_snapshot_run_id }}
+          github-token: ${{ github.token }}
+          path: _work/frontend-input
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: windows-arm32-engine-rt-linux-x64
+          run-id: ${{ inputs.frontend_platform_run_id }}
+          github-token: ${{ github.token }}
+          path: _work/platform-input
+      - name: Stage verified official Windows Dart and matching source platform
+        run: |
+          mkdir -p _work/windows-bootstrap _work/platform
+          curl --fail --location --retry 3 \
+            https://storage.googleapis.com/flutter_infra_release/releases/stable/windows/flutter_windows_3.38.10-stable.zip \
+            --output _work/windows-bootstrap.zip
+          echo '97e560d028f1b0b414e5f19ac2c4ebf079c001e8a18563a0e940c4d84700d334  _work/windows-bootstrap.zip' | sha256sum --check
+          python3 -B - <<'PYZIP'
+          import zipfile
+          with zipfile.ZipFile('_work/windows-bootstrap.zip') as archive:
+              for member in archive.namelist():
+                  if member.startswith('flutter/bin/cache/dart-sdk/'):
+                      archive.extract(member, '_work/windows-bootstrap')
+          PYZIP
+          rm _work/windows-bootstrap.zip
+          (cd _work/platform-input && sha256sum --check windows-arm32-engine-rt-linux-x64.tar.gz.sha256)
+          tar -xzf _work/platform-input/windows-arm32-engine-rt-linux-x64.tar.gz -C _work/platform \
+            ./engine-build-provenance.json ./flutter_patched_sdk/platform_strong.dill \
+            ./flutter_patched_sdk/vm_outline_strong.dill
+      - name: Compile a Flutter ARM32 kernel with the native Windows frontend
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/_work/tmp"
+          export TMPDIR="$GITHUB_WORKSPACE/_work/tmp"
+          xvfb-run -a python3 -B dev/windows_arm32/check_windows_frontend.py \
+            --runtime _work/windows-bootstrap/flutter/bin/cache/dart-sdk/bin/dartaotruntime.exe \
+            --frontend _work/frontend-input/frontend_server_aot.dart.snapshot \
+            --patched-sdk _work/platform/flutter_patched_sdk \
+            --engine-provenance _work/platform/engine-build-provenance.json \
+            --output _work/frontend-check
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: windows-arm32-windows-frontend-runtime
+          path: |
+            _work/frontend-check/verification.json
+            _work/frontend-check/runtime-compile.log
+          if-no-files-found: warn
+
+  sdk_host_bootstrap:
+    if: ${{ !inputs.windows_resources && !inputs.windows_sdk_assembly && (inputs.sdk_host_bootstrap || inputs.windows_flutter_bootstrap) }}
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        host: ${{ inputs.windows_flutter_bootstrap && fromJSON('["windows-x64"]') || fromJSON('["linux-x64", "windows-x64", "macos-x64", "macos-arm64"]') }}
+    steps:
+      - name: Prepare ordinary Ubuntu amd64 container
+        run: |
+          test "$(uname -m)" = x86_64
+          mkdir -p "$GITHUB_WORKSPACE/_work/tmp"
+          echo "TMPDIR=$GITHUB_WORKSPACE/_work/tmp" >> "$GITHUB_ENV"
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends git curl ca-certificates python3 xz-utils
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 2
+          fetch-tags: true
+          persist-credentials: false
+      - name: Stage exact official host cache with relocatable current port sources
+        env:
+          SDK_HOST: ${{ matrix.host }}
+        run: |
+          mkdir -p _work/tmp
+          export TMPDIR="$PWD/_work/tmp" TMP="$PWD/_work/tmp" TEMP="$PWD/_work/tmp"
+          export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$PWD"
+          python3 -B - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          from dev.windows_arm32.sdk_hosts import select_host
+          host = select_host(os.environ['SDK_HOST'])
+          archive = Path('_work') / Path(host['officialArchive']).name
+          subprocess.run(['curl', '--fail', '--location', '--retry', '3',
+              'https://storage.googleapis.com/flutter_infra_release/releases/' + host['officialArchive'],
+              '--output', str(archive)], check=True)
+          subprocess.run(['python3', '-B', 'dev/windows_arm32/bootstrap_host_sdk.py',
+              '--archive', str(archive), '--host', host['id'], '--sdk', '_work/host SDK 日本語'], check=True)
+          sdk = Path('_work/host SDK 日本語')
+          record = json.loads((sdk / 'bin/cache/windows-arm32-host-bootstrap.json').read_text())
+          record['bundledWindowsGitIncluded'] = (sdk / 'bin/mingit/cmd/git.exe').is_file()
+          record['ordinaryFlutterBuildVerified'] = False
+          Path('_work/bootstrap-verification.json').write_text(json.dumps(record, indent=2) + '\n')
+          # This job checks official host inputs. Native compiler/engine
+          # assembly and unchanged application builds are subsequent gates.
+          PY
+      - uses: ./.github/actions/windows-host-runtime
+        if: ${{ inputs.windows_flutter_bootstrap }}
+        env:
+          TMPDIR: ${{ github.workspace }}/_work/tmp
+      - name: Prepare official native PowerShell only for CI bootstrap verification
+        if: ${{ inputs.windows_flutter_bootstrap }}
+        run: |
+          mkdir -p _work/powershell-native
+          curl --fail --location --connect-timeout 30 --max-time 300 \
+            --retry 3 --retry-max-time 600 \
+            https://github.com/PowerShell/PowerShell/releases/download/v7.4.13/PowerShell-7.4.13-win-x64.zip \
+            --output _work/powershell.zip
+          echo '8fb52d2172d285b230c2857a90ba4dd28ecf6477ba4a91f91b6854a647b33b65  _work/powershell.zip' | sha256sum --check
+          python3 -B -m zipfile -e _work/powershell.zip _work/powershell-native
+      - name: Execute normal Windows Flutter bootstrap before and after relocation
+        if: ${{ inputs.windows_flutter_bootstrap }}
+        run: |
+          xvfb-run -a python3 -B dev/windows_arm32/check_windows_flutter_bootstrap.py \
+            --sdk '_work/host SDK 日本語' --powershell _work/powershell-native/pwsh.exe \
+            --output _work/flutter-bootstrap-check --trace-bootstrap
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: windows-arm32-sdk-bootstrap-${{ matrix.host }}
+          path: |
+            _work/bootstrap-verification.json
+            _work/flutter-bootstrap-check/verification.json
+            _work/flutter-bootstrap-check/wine-where-verification.json
+            _work/flutter-bootstrap-check/wine-handles-verification.json
+            _work/flutter-bootstrap-check/wine-exit-status-verification.json
+            _work/flutter-bootstrap-check/*trace-stdout.log
+            _work/flutter-bootstrap-check/*trace-stderr.log
+            _work/flutter-bootstrap-check/*-stdout.log
+            _work/flutter-bootstrap-check/*-stderr.log
+            _work/flutter-bootstrap-check/*-process.json
+          if-no-files-found: error
+
+  windows_sdk_assembly:
+    if: ${{ inputs.windows_sdk_assembly }}
+    uses: ./.github/workflows/windows-arm32-windows-sdk.yml
+
+  windows_resources:
+    if: inputs.windows_resources
+    uses: ./.github/workflows/windows-arm32-windows-compiler.yml
+    with:
+      python_run_id: ${{ inputs.python_run_id }}
+      compile: true
+      resources_only: true

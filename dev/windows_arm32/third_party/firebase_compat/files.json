@@ -1,0 +1,119 @@
+{
+  "files": [
+    {
+      "path": "AppServiceExtension.xml",
+      "sha256": "3081121b501dd9f6daed5967f7743629352633a9b255d98b929d1e5a4ff5cb62",
+      "bytes": 173
+    },
+    {
+      "path": "PackageDependency.xml",
+      "sha256": "baa67453e8a8e2a106d4fc4e8bfd8c2ed20416e2ad733b13886fb47b56806115",
+      "bytes": 102
+    },
+    {
+      "path": "README.md",
+      "sha256": "be7aca56639cf0d3c3f43467f9a292b1555c0e3adbb64872d8a25f131a65fd72",
+      "bytes": 4741
+    },
+    {
+      "path": "consumer.json",
+      "sha256": "ef9c8dc0509b4cefc6a77d5c00d45e35be3e27440bc6d8176493c3f3a8f2f828",
+      "bytes": 2160
+    },
+    {
+      "path": "docs/MIGRATION.md",
+      "sha256": "3cbba7d74b1536d831e61d2ee7f036dcccd8f24c16a90d03d1cd1c0f148dfab3",
+      "bytes": 12610
+    },
+    {
+      "path": "docs/SDK_ABI.md",
+      "sha256": "b0096871b1590faf1c0b6cc7323eb08a3b5d4d8c3039739824ca3e6b4e8c07e8",
+      "bytes": 57309
+    },
+    {
+      "path": "include/firebase_compat/messaging_error.h",
+      "sha256": "60c6b29e738216600eb862c054216d07c69453b398e8d3269e8949514861e616",
+      "bytes": 657
+    },
+    {
+      "path": "include/firebase_compat/notification_settings.h",
+      "sha256": "61974bdf3faf2c79a9a9b0018af9813c97a1019f36fb3852be2a2ab8803dd710",
+      "bytes": 1185
+    },
+    {
+      "path": "include/firebase_compat/sdk.h",
+      "sha256": "d847272c848a7bc3040ffdda73d678fb776129b4b388347bf2747a23789c1e5b",
+      "bytes": 21659
+    },
+    {
+      "path": "include/wpn_background.h",
+      "sha256": "e110b42d3cdd49ba355639812879e54a0339ebaa015561c9f8a18ae7b2a609c1",
+      "bytes": 890
+    },
+    {
+      "path": "include/wpn_fcm.h",
+      "sha256": "6029729969d6b58db5f08f9a82bb8d932045b0998d348ec4c96e5ce72d5b1462",
+      "bytes": 3170
+    },
+    {
+      "path": "include/wpn_fcm_message.h",
+      "sha256": "621008a07c6d4efc4e0c5b9d9ed04e5b7bfae0877e063d090e98a99d96fcd677",
+      "bytes": 1054
+    },
+    {
+      "path": "include/wpn_fcm_response.h",
+      "sha256": "d5272a0abc82f6e7b8c178aa420de496a4bf8275329faf27c03ce2cc2f7a047c",
+      "bytes": 1692
+    },
+    {
+      "path": "include/wpn_recovery.h",
+      "sha256": "36529d4632df5bc7febf81785b19eb33ef39d38737b573097f45cad688e503c4",
+      "bytes": 1147
+    },
+    {
+      "path": "include/wpn_runtime.h",
+      "sha256": "cbaacc641eabead9cbc546b5edb01168cace69eea7b23fc27983e11c1cfdc233",
+      "bytes": 446
+    },
+    {
+      "path": "include/wpnotify.h",
+      "sha256": "f3617839f7a215131ce2744a1c07133f29a6abc174852213229f5405d7651a6d",
+      "bytes": 11910
+    },
+    {
+      "path": "lib/arm/wpnotify.lib",
+      "sha256": "c7f887319291e4f32eb095a7c01589db3f97994bdc0ac319ddb1791f5def50e8",
+      "bytes": 22512
+    },
+    {
+      "path": "licenses/firebase-compat/ICU-LICENSE.txt",
+      "sha256": "25e21013a7bc2fad735e28c5278a120e4c7f1c327c8c8b9b4df1751748cddbb2",
+      "bytes": 21001
+    },
+    {
+      "path": "licenses/firebase-compat/LICENSE",
+      "sha256": "a598db94b6290ffbe10b5ecf911057b6a943351c727fdda9e5f2891d68700a20",
+      "bytes": 1519
+    },
+    {
+      "path": "licenses/firebase-compat/NOTICE",
+      "sha256": "b75a42b80e49afafd27a85298a60df975a823ac1b625201dcb2512d1043d346a",
+      "bytes": 615
+    },
+    {
+      "path": "licenses/firebase-compat/UNICODE-LICENSE.txt",
+      "sha256": "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96",
+      "bytes": 1995
+    },
+    {
+      "path": "licenses/wpnotify/LICENSE",
+      "sha256": "24b62d063f89495ec708cb37cf2b64051c04912de9e2a4e6fdde72ee8f21472e",
+      "bytes": 1078
+    },
+    {
+      "path": "licenses/wpnotify/NOTICE",
+      "sha256": "1b01de787b9b75ac9d12de86e0e7717da606e46ee6ca104648c91e293d844a35",
+      "bytes": 1178
+    }
+  ]
+}

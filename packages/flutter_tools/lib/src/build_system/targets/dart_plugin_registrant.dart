@@ -42,7 +42,13 @@ class DartPluginRegistrantTarget extends Target {
     final String mainFileUriString =
         packageConfig.toPackageUri(mainFileUri)?.toString() ?? mainFileUri.toString();
 
-    await generateMainDartWithPluginRegistrant(project, packageConfig, mainFileUriString, mainFile);
+    await generateMainDartWithPluginRegistrant(
+      project,
+      packageConfig,
+      mainFileUriString,
+      mainFile,
+      windowsPhone: environment.defines[kWindowsPhone] == 'true',
+    );
   }
 
   @override

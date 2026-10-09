@@ -1,0 +1,20 @@
+wpnotify source distribution
+
+The original C implementation and documentation in libs/wpnotify are MIT
+licensed; retain LICENSE and this NOTICE in source and binary distributions.
+
+Protocol/ABI references (not bundled source dependencies):
+- microG GmsCore checkin.proto, mcs.proto and RegisterRequest.java: Apache-2.0.
+- Firebase Android SDK GmsRpc.java: Apache-2.0 (token deletion/topic protocol).
+- Microsoft Windows SDK metadata / windows-rs: Windows Runtime ABI identifiers
+  and interface method order. No windows-rs implementation is bundled here.
+
+The implementation uses Windows' HTTP, TLS (SChannel), notification and socket
+broker services. It contains no bundled Google/Firebase SDK, generated microG
+protobuf code, TLS library, Google credentials, service account key or device
+state. Wire fields and ABI layouts are described directly in the C sources.
+
+The LLVM-MinGW headers/runtime, Clang, compiler-rt, linker and Windows OS are
+external build/runtime dependencies with their own licenses. This MIT grant
+does not relicense those dependencies or application/engine adapter sources.
+A distributor must retain the applicable toolchain/runtime notices separately.

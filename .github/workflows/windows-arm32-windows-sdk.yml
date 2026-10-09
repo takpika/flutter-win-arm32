@@ -1,0 +1,263 @@
+name: Assemble and validate native Windows ARM32 SDK
+on:
+  # Register manual assembly while validating the single port commit.
+  push:
+    branches: [sdk-host-tools-validation]
+    paths: [.github/workflows/windows-arm32-windows-sdk.yml]
+  workflow_dispatch:
+    inputs:
+      resource_run:
+        default: '38577134938'
+        description: Common source-built Windows LLVM resource utilities
+      cargo_cache_key:
+        default: ''
+        description: Exact compatible Cargo cache for a diagnostic-only retry
+      engine_run:
+        default: '38423410946'
+        description: Current-source common RT and Phone engines and target data
+      compiler_run:
+        default: '38449600271'
+        description: Source-built common Windows x64 compiler
+      python_run:
+        default: '38388564532'
+        description: Audited native Python and Pillow
+      launcher_run:
+        default: '38387198830'
+        description: Source-built native Python launcher
+      rust_run:
+        default: '38550837594'
+        description: Complete native Windows Rust distributions
+      msix_run:
+        default: '38468263860'
+        description: Source-built complete Windows MSIX packager
+      frontend_run:
+        default: '38445964591'
+        description: Source-built matching native frontend snapshot
+      generator_run:
+        default: '38426271614'
+        description: Current common VM source Windows ARM32 snapshot generator
+  workflow_call:
+    inputs:
+      resource_run:
+        type: string
+        default: '38577134938'
+        description: Common source-built Windows LLVM resource utilities
+      cargo_cache_key:
+        type: string
+        default: ''
+        description: Exact compatible Cargo cache for a diagnostic-only retry
+      engine_run:
+        type: string
+        default: '38423410946'
+        description: Current-source common RT and Phone engines and target data
+      compiler_run:
+        type: string
+        default: '38449600271'
+        description: Source-built common Windows x64 compiler
+      python_run:
+        type: string
+        default: '38388564532'
+        description: Audited native Python and Pillow
+      launcher_run:
+        type: string
+        default: '38387198830'
+        description: Source-built native Python launcher
+      rust_run:
+        type: string
+        default: '38550837594'
+        description: Complete native Windows Rust distributions
+      msix_run:
+        type: string
+        default: '38468263860'
+        description: Source-built complete Windows MSIX packager
+      frontend_run:
+        type: string
+        default: '38445964591'
+        description: Source-built matching native frontend snapshot
+      generator_run:
+        type: string
+        default: '38426271614'
+        description: Current common VM source Windows ARM32 snapshot generator
+permissions:
+  contents: read
+  actions: read
+jobs:
+  windows_sdk:
+    if: github.event_name != 'push'
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      ENGINE_RUN: ${{ inputs.engine_run }}
+      COMPILER_RUN: ${{ inputs.compiler_run }}
+      RESOURCE_RUN: ${{ inputs.resource_run }}
+      PYTHON_RUN: ${{ inputs.python_run }}
+      LAUNCHER_RUN: ${{ inputs.launcher_run }}
+      RUST_RUN: ${{ inputs.rust_run }}
+      MSIX_RUN: ${{ inputs.msix_run }}
+      FRONTEND_RUN: ${{ inputs.frontend_run }}
+      GENERATOR_RUN: ${{ inputs.generator_run }}
+    steps:
+      - name: Prepare ordinary Ubuntu amd64 container
+        run: |
+          test "$(uname -m)" = x86_64
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends git gh curl ca-certificates python3 xz-utils
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Prepare current independent Windows SDK sources and exact official cache
+        run: |
+          mkdir -p _work/tmp
+          export TMPDIR="$GITHUB_WORKSPACE/_work/tmp"
+          echo "TMPDIR=$TMPDIR" >> "$GITHUB_ENV"
+          export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$PWD"
+          echo "GIT_CONFIG_COUNT=1" >> "$GITHUB_ENV"
+          echo "GIT_CONFIG_KEY_0=safe.directory" >> "$GITHUB_ENV"
+          echo "GIT_CONFIG_VALUE_0=$PWD" >> "$GITHUB_ENV"
+          git fetch --no-tags origin c6f67dede3d4aa1aa7a69dd56a3494a5cde6cc80:refs/tags/3.38.10
+          curl --fail --location --retry 3 \
+            https://storage.googleapis.com/flutter_infra_release/releases/stable/windows/flutter_windows_3.38.10-stable.zip \
+            --output _work/windows-official.zip
+          python3 -B dev/windows_arm32/bootstrap_host_sdk.py \
+            --archive _work/windows-official.zip --host windows-x64 --sdk '_work/Windows SDK 日本語'
+          rm _work/windows-official.zip
+      - name: Download only successful current-source build components
+        run: |
+          python3 -B - <<'PY'
+          import json,os,subprocess
+          from pathlib import Path
+          components = {
+            'compiler': ('COMPILER_RUN', 'windows-arm32-compiler-windows-x64'),
+            'resources': ('RESOURCE_RUN', 'windows-arm32-resource-tools-windows-x64'),
+            'python': ('PYTHON_RUN', 'windows-arm32-python-windows-x64'),
+            'launcher': ('LAUNCHER_RUN', 'windows-arm32-windows-x64-launcher'),
+            'rust-1.95.0': ('RUST_RUN', 'windows-arm32-rust-1.95.0-windows-x64'),
+            'rust-1.93.1': ('RUST_RUN', 'windows-arm32-rust-1.93.1-windows-x64'),
+            'msix': ('MSIX_RUN', 'windows-arm32-msix-windows-x64'),
+            'frontend': ('FRONTEND_RUN', 'windows-arm32-frontend-windows-x64'),
+            'generator': ('GENERATOR_RUN', 'windows-arm32-snapshot-windows-x64'),
+            'engines': ('ENGINE_RUN', 'windows-arm32-engines-linux-x64'),
+            'linux-sdk': ('ENGINE_RUN', 'flutter-windows-arm32-linux-x64'),
+          }
+          runs={}
+          for name,(key,artifact) in components.items():
+            run=os.environ[key]
+            if not run.isdecimal(): raise ValueError('Invalid component run id')
+            if run not in runs:
+              record=json.loads(subprocess.check_output(['gh','api','repos/'+os.environ['GH_REPO']+'/actions/runs/'+run]))
+              if record['status']!='completed' or record['conclusion']!='success' or record['head_repository']['full_name']!=os.environ['GH_REPO']:
+                raise ValueError('Expected a successful build from this repository')
+              runs[run]=record
+            subprocess.run(['gh','run','download',run,'--name',artifact,'--dir','_work/inputs/'+name],check=True)
+          Path('_work/component-runs.json').write_text(json.dumps(runs,indent=2)+'\n')
+          PY
+      - name: Stage host-contained dependencies with original target data
+        run: |
+          python3 -B dev/windows_arm32/testing/stage_host_sdk_inputs.py \
+            --work _work --sdk '_work/Windows SDK 日本語'
+          python3 -B dev/windows_arm32/prepare_uwp_headers.py \
+            --sdk '_work/Windows SDK 日本語' --work _work/uwp-header-inputs
+      - uses: ./.github/actions/windows-host-runtime
+      - name: Prepare official Windows verification and build tools
+        run: |
+          mkdir -p _work/powershell-native _work/native-build-tools
+          curl --fail --location --retry 3 --connect-timeout 30 --max-time 300 \
+            https://github.com/PowerShell/PowerShell/releases/download/v7.4.13/PowerShell-7.4.13-win-x64.zip \
+            --output _work/powershell.zip
+          echo '8fb52d2172d285b230c2857a90ba4dd28ecf6477ba4a91f91b6854a647b33b65  _work/powershell.zip' | sha256sum --check
+          curl --fail --location --retry 3 \
+            https://github.com/Kitware/CMake/releases/download/v3.31.9/cmake-3.31.9-windows-x86_64.zip \
+            --output _work/cmake.zip
+          echo 'dc16867d0c0ffb35026976aff119335d5b47def44e76ae82ffafdc1f98b3d59d  _work/cmake.zip' | sha256sum --check
+          curl --fail --location --retry 3 \
+            https://github.com/ninja-build/ninja/releases/download/v1.13.2/ninja-win.zip \
+            --output _work/ninja.zip
+          echo '07fc8261b42b20e71d1720b39068c2e14ffcee6396b76fb7a795fb460b78dc65  _work/ninja.zip' | sha256sum --check
+          curl --fail --location --retry 3 \
+            https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/MinGit-2.56.0.2-64-bit.zip \
+            --output _work/git.zip
+          echo 'da35e72aa21c005a5a0d298cfbae110bc1609a815730ea0dde84b01a1b3cd3be  _work/git.zip' | sha256sum --check
+          python3 -B - <<'PY'
+          import shutil,zipfile
+          for name,destination in [('powershell','_work/powershell-native'),('cmake','_work/native-build-tools'),('ninja','_work/native-build-tools/ninja'),('git','_work/native-build-tools/git')]:
+            with zipfile.ZipFile('_work/'+name+'.zip') as archive: archive.extractall(destination)
+          # Cargokit requests powershell by its standard Windows command name.
+          # Wine's builtin is not the installed PowerShell runtime. The official
+          # apphost embeds pwsh.dll, so this alias runs the identical runtime.
+          shutil.copy2('_work/powershell-native/pwsh.exe','_work/powershell-native/powershell.exe')
+          PY
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: localsend/localsend
+          ref: 5ccc6dea192d1c697c2602bf456b2eb2ad8e9674
+          path: _work/localsend
+          persist-credentials: false
+      - name: Validate optional diagnostic Cargo cache identity
+        if: inputs.cargo_cache_key != ''
+        env:
+          CARGO_CACHE_KEY: ${{ inputs.cargo_cache_key }}
+        run: |
+          python3 -B - <<'PY'
+          import os, re
+          prefix = 'windows-sdk-cargo-v1-localsend5ccc6dea-' + os.environ['COMPILER_RUN'] + '-' + os.environ['RUST_RUN'] + '-'
+          if not re.fullmatch(re.escape(prefix) + r'[0-9a-f]{64}-[0-9]+', os.environ['CARGO_CACHE_KEY']):
+              raise ValueError('Diagnostic cache must use the same application, compiler and Rust inputs')
+          PY
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        id: cargo_cache
+        with:
+          key: windows-sdk-cargo-v1-localsend5ccc6dea-${{ inputs.compiler_run }}-${{ inputs.rust_run }}-${{ hashFiles('dev/windows_arm32/toolchain/prepare_rust.py', 'dev/windows_arm32/toolchain/gnu_driver.py', 'dev/windows_arm32/toolchain/rust_cc.py', 'dev/windows_arm32/toolchain/msvc_options.py', 'dev/windows_arm32/toolchain/compat_include/**', 'dev/windows_arm32/configure_sdk_dependencies.py', 'dev/windows_arm32/toolchain/prepare_rust_dependencies.py', 'dev/windows_arm32/toolchain/rustc_sysroot.py', 'dev/windows_arm32/toolchain/*.patch') }}-${{ github.run_id }}
+          restore-keys: |
+            windows-sdk-cargo-v1-localsend5ccc6dea-${{ inputs.compiler_run }}-${{ inputs.rust_run }}-${{ hashFiles('dev/windows_arm32/toolchain/prepare_rust.py', 'dev/windows_arm32/toolchain/gnu_driver.py', 'dev/windows_arm32/toolchain/rust_cc.py', 'dev/windows_arm32/toolchain/msvc_options.py', 'dev/windows_arm32/toolchain/compat_include/**', 'dev/windows_arm32/configure_sdk_dependencies.py', 'dev/windows_arm32/toolchain/prepare_rust_dependencies.py', 'dev/windows_arm32/toolchain/rustc_sysroot.py', 'dev/windows_arm32/toolchain/*.patch') }}-
+            ${{ inputs.cargo_cache_key }}
+          path: _work/localsend/app/build/windows/arm/plugins/*/cargokit_build
+      - name: Relink target libraries with the current SDK adapters
+        run: |
+          python3 -B - <<'PY'
+          from pathlib import Path
+          for target in Path('_work/localsend/app/build/windows/arm/plugins').glob('*/cargokit_build/thumbv7a-rt-windows-msvc'):
+              for path in target.rglob('*'):
+                  if path.is_file() and path.name.endswith(('.dll', '.dll.lib')):
+                      path.unlink()
+          PY
+      - name: Assemble and build unchanged LocalSend with relocated native Windows SDK
+        run: |
+          xvfb-run -a python3 -B dev/windows_arm32/testing/assemble_windows_sdk.py \
+            --sdk '_work/Windows SDK 日本語' --work _work \
+            --powershell _work/powershell-native/pwsh.exe --diagnose
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        if: always() && steps.cargo_cache.outputs.cache-primary-key != ''
+        with:
+          key: ${{ steps.cargo_cache.outputs.cache-primary-key }}
+          path: _work/localsend/app/build/windows/arm/plugins/*/cargokit_build
+      - name: Audit and package the verified Windows SDK
+        run: |
+          python3 -B dev/windows_arm32/testing/package_windows_sdk.py \
+            --sdk '_work/relocated Windows SDK 日本語' \
+            --archive _work/flutter-windows-arm32-windows-x64.zip
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: flutter-windows-arm32-windows-x64
+          path: _work/flutter-windows-arm32-windows-x64.zip*
+          compression-level: 0
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: windows-arm32-windows-sdk-assembly-proof
+          path: |
+            _work/component-runs.json
+            _work/windows-sdk-inputs.json
+            _work/windows-assembly-check/*.json
+            _work/windows-assembly-check/native-tool-failures/*.json
+            _work/localsend/app/build/windows/arm-phone/native/ffi/build.log
+            _work/windows-assembly-check/*.log
+            _work/windows-assembly-check/*.error.txt
+            _work/windows-assembly-check/*.environment.txt
+            _work/windows-assembly-check/*.module-import.txt
+          if-no-files-found: warn

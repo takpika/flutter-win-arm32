@@ -1,6 +1,11 @@
 # Auto detect text files and perform LF normalization
 *        text=auto
 
+# Patch context and upstream license text must retain their original bytes.
+dev/windows_arm32/**/*.patch -text -whitespace
+dev/windows_arm32/toolchain/LLVM-LICENSE.txt -text -whitespace
+dev/windows_arm32/plugins/windows_taskbar/LICENSE.windows_taskbar -text -whitespace
+
 # Always perform LF normalization on these files
 *.dart   text
 *.gradle text

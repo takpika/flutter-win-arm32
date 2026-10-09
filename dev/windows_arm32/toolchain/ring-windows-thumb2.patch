@@ -1,0 +1,117 @@
+--- a/build.rs
++++ b/build.rs
+@@ -204,6 +204,11 @@
+         oss: APPLE_ABI,
+         arch: X86_64,
+         perlasm_format: "macosx",
++    },
++    AsmTarget {
++        oss: &[WINDOWS],
++        arch: ARM,
++        perlasm_format: "win32",
+     },
+     AsmTarget {
+         oss: &[WINDOWS],
+--- a/crypto/perlasm/arm-xlate.pl
++++ b/crypto/perlasm/arm-xlate.pl
+@@ -38,7 +38,7 @@
+ };
+ my $hidden = sub {
+     if ($flavour =~ /ios/)	{ ".private_extern\t".join(',',@_); }
+-    elsif ($flavour =~ /win64/) { ""; }
++    elsif ($flavour =~ /win/) { ""; }
+     else			{ ".hidden\t".join(',',@_); }
+ };
+ my $comm = sub {
+@@ -89,7 +89,7 @@
+ 					"#endif";
+ 				  }
+ 			        }
+-    elsif ($flavour =~ /win64/) { if (join(',',@_) =~ /(\w+),%function/) {
++    elsif ($flavour =~ /win/) { if (join(',',@_) =~ /(\w+),%function/) {
+                 # See https://sourceware.org/binutils/docs/as/Pseudo-Ops.html
+                 # Per https://docs.microsoft.com/en-us/windows/win32/debug/pe-format#coff-symbol-table,
+                 # the type for functions is 0x20, or 32.
+--- a/crypto/poly1305/poly1305_arm_asm.S
++++ b/crypto/poly1305/poly1305_arm_asm.S
+@@ -1,6 +1,6 @@
+ #include <ring-core/asm_base.h>
+ 
+-#if !defined(OPENSSL_NO_ASM) && defined(OPENSSL_ARM) && defined(__ELF__)
++#if !defined(OPENSSL_NO_ASM) && defined(OPENSSL_ARM) && (defined(__ELF__) || defined(_WIN32))
+ 
+ #pragma GCC diagnostic ignored "-Wlanguage-extension-token"
+ 
+@@ -52,7 +52,12 @@
+ # qhasm: reg128 caller_q7
+ 
+ # qhasm: startcode
++#if defined(__ELF__)
+ .fpu neon
++#else
++.syntax unified
++.thumb
++#endif
+ .text
+ 
+ # qhasm: reg128 r0
+@@ -158,13 +163,30 @@
+ # qhasm: qpushenter crypto_onetimeauth_poly1305_neon2_blocks
+ .align 4
+ .global openssl_poly1305_neon2_blocks
++#if defined(__ELF__)
+ .hidden openssl_poly1305_neon2_blocks
+ .type openssl_poly1305_neon2_blocks STT_FUNC
++#else
++.def openssl_poly1305_neon2_blocks
++.scl 2
++.type 32
++.endef
++.thumb_func
++#endif
+ openssl_poly1305_neon2_blocks:
++#if defined(_WIN32)
++push {r4,lr}
++#endif
+ vpush {q4,q5,q6,q7}
+ mov r12,sp
+ sub sp,sp,#192
++#if defined(_WIN32)
++mov r4,sp
++bic r4,r4,#31
++mov sp,r4
++#else
+ bic sp,sp,#31
++#endif
+ 
+ # qhasm: len = input_3
+ # asm 1: mov >len=int32#4,<input_3=int32#4
+@@ -1522,7 +1544,11 @@
+ # qhasm: qpopreturn len
+ mov sp,r12
+ vpop {q4,q5,q6,q7}
++#if defined(_WIN32)
++pop {r4,pc}
++#else
+ bx lr
++#endif
+ 
+ # qhasm: int32 input_0
+ 
+@@ -1617,8 +1643,16 @@
+ # qhasm: enter crypto_onetimeauth_poly1305_neon2_addmulmod
+ .align 2
+ .global openssl_poly1305_neon2_addmulmod
++#if defined(__ELF__)
+ .hidden openssl_poly1305_neon2_addmulmod
+ .type openssl_poly1305_neon2_addmulmod STT_FUNC
++#else
++.def openssl_poly1305_neon2_addmulmod
++.scl 2
++.type 32
++.endef
++.thumb_func
++#endif
+ openssl_poly1305_neon2_addmulmod:
+ sub sp,sp,#0
+ 

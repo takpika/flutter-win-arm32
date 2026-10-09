@@ -69,7 +69,8 @@ class WindowBindingHandler {
   // Returns whether the surface was successfully updated or not.
   virtual bool OnBitmapSurfaceUpdated(const void* allocation,
                                       size_t row_bytes,
-                                      size_t height) = 0;
+                                      size_t height,
+                                      bool top_down = true) = 0;
 
   // Invoked when the app ends IME composing, such when the active text input
   // client is cleared.

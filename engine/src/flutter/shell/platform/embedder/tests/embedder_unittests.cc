@@ -12,6 +12,7 @@
 #include "embedder_engine.h"
 #include "flutter/common/constants.h"
 #include "flutter/flow/raster_cache.h"
+#include "flutter/fml/closure.h"
 #include "flutter/fml/file.h"
 #include "flutter/fml/make_copyable.h"
 #include "flutter/fml/mapping.h"
@@ -23,6 +24,7 @@
 #include "flutter/fml/thread.h"
 #include "flutter/fml/time/time_delta.h"
 #include "flutter/fml/time/time_point.h"
+#include "flutter/lib/ui/plugins/callback_cache.h"
 #include "flutter/runtime/dart_vm.h"
 #include "flutter/shell/platform/embedder/tests/embedder_assertions.h"
 #include "flutter/shell/platform/embedder/tests/embedder_config_builder.h"
@@ -77,6 +79,31 @@ TEST_F(EmbedderTest, CanLaunchAndShutdownWithValidProjectArgs) {
   engine.reset();
 }
 
+TEST_F(EmbedderTest, ConfiguresPluginCallbackCacheBeforeDartStarts) {
+  fml::ScopedTemporaryDirectory directory;
+  const auto path =
+      fml::paths::JoinPaths({directory.path(), "flutter_callback_cache.json"});
+  const auto previous_path = DartCallbackCache::GetCachePath();
+  fml::ScopedCleanupClosure restore_path([previous_path] {
+    DartCallbackCache::SetCachePath(
+        previous_path.empty() ? std::string()
+                              : fml::paths::GetDirectoryName(previous_path));
+  });
+  auto& context = GetEmbedderContext<EmbedderTestContextSoftware>();
+  fml::AutoResetWaitableEvent latch;
+  context.AddIsolateCreateCallback([&] {
+    EXPECT_EQ(DartCallbackCache::GetCachePath(), path);
+    latch.Signal();
+  });
+  EmbedderConfigBuilder builder(context);
+  builder.SetSurface(DlISize(1, 1));
+  builder.GetProjectArgs().dart_callback_cache_path = directory.path().c_str();
+  auto engine = builder.LaunchEngine();
+  ASSERT_TRUE(engine.is_valid());
+  latch.Wait();
+  engine.reset();
+}
+
 // TODO(41999): Disabled because flaky.
 TEST_F(EmbedderTest, DISABLED_CanLaunchAndShutdownMultipleTimes) {
   auto& context = GetEmbedderContext<EmbedderTestContextSoftware>();
@@ -102,6 +129,63 @@ TEST_F(EmbedderTest, CanInvokeCustomEntrypoint) {
   auto engine = builder.LaunchEngine();
   latch.Wait();
   ASSERT_TRUE(engine.is_valid());
+}
+
+TEST_F(EmbedderTest, CanInvokeCustomEntrypointWithLibraryUri) {
+  auto& context = GetEmbedderContext<EmbedderTestContextSoftware>();
+  fml::AutoResetWaitableEvent latch;
+  std::string library_uri;
+  context.AddNativeCallback("SayHiFromCustomEntrypoint",
+                            CREATE_NATIVE_ENTRY([&](Dart_NativeArguments args) {
+                              const char* uri = nullptr;
+                              Dart_Handle result = Dart_StringToCString(
+                                  Dart_LibraryUrl(Dart_RootLibrary()), &uri);
+                              if (!Dart_IsError(result) && uri) {
+                                library_uri = uri;
+                              }
+                              latch.Signal();
+                            }));
+  {
+    EmbedderConfigBuilder builder(context);
+    builder.SetSurface(DlISize(1, 1));
+    builder.SetDartEntrypoint("customEntrypoint");
+    auto engine = builder.LaunchEngine();
+    ASSERT_TRUE(engine.is_valid());
+    latch.Wait();
+  }
+  ASSERT_FALSE(library_uri.empty());
+  const auto slash = library_uri.find_last_of('/');
+  ASSERT_NE(slash, std::string::npos);
+  const std::string explicit_library_uri =
+      library_uri.substr(0, slash + 1) + "library_entrypoint.dart";
+  EmbedderConfigBuilder builder(context);
+  builder.SetSurface(DlISize(1, 1));
+  builder.SetDartEntrypoint("libraryEntrypoint");
+  builder.GetProjectArgs().custom_dart_entrypoint_library =
+      explicit_library_uri.c_str();
+  auto engine = builder.LaunchEngine();
+  ASSERT_TRUE(engine.is_valid());
+  latch.Wait();
+}
+
+TEST_F(EmbedderTest, OlderProjectArgsIgnoreEntrypointLibrary) {
+  auto& context = GetEmbedderContext<EmbedderTestContextSoftware>();
+  static fml::AutoResetWaitableEvent latch;
+  context.AddNativeCallback("SayHiFromCustomEntrypoint",
+                            [](Dart_NativeArguments args) { latch.Signal(); });
+  EmbedderConfigBuilder builder(context);
+  builder.SetSurface(DlISize(1, 1));
+  builder.SetDartEntrypoint("customEntrypoint");
+  builder.GetProjectArgs().custom_dart_entrypoint_library =
+      "package:missing/entrypoint.dart";
+  builder.GetProjectArgs().dart_callback_cache_path = "must-not-be-used";
+  const auto callback_path = DartCallbackCache::GetCachePath();
+  builder.GetProjectArgs().struct_size =
+      offsetof(FlutterProjectArgs, custom_dart_entrypoint_library);
+  auto engine = builder.LaunchEngine();
+  ASSERT_TRUE(engine.is_valid());
+  latch.Wait();
+  EXPECT_EQ(DartCallbackCache::GetCachePath(), callback_path);
 }
 
 TEST_F(EmbedderTest, CanInvokeCustomEntrypointMacro) {

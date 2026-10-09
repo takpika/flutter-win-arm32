@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 
+
 #include "flutter/fml/build_config.h"
 #include "flutter/fml/closure.h"
 #include "flutter/fml/make_copyable.h"
@@ -33,6 +34,7 @@
 #endif  // FML_OS_WIN
 #endif  // !FLUTTER_NO_EXPORT
 
+
 extern "C" {
 #if FLUTTER_RUNTIME_MODE == FLUTTER_RUNTIME_MODE_DEBUG
 // Used for debugging dart:* sources.
@@ -50,6 +52,7 @@ extern const intptr_t kPlatformStrongDillSize;
 #include "flutter/fml/message_loop.h"
 #include "flutter/fml/paths.h"
 #include "flutter/fml/trace_event.h"
+#include "flutter/lib/ui/plugins/callback_cache.h"
 #include "flutter/shell/common/rasterizer.h"
 #include "flutter/shell/common/switches.h"
 #include "flutter/shell/platform/embedder/embedder.h"
@@ -71,9 +74,10 @@ extern const intptr_t kPlatformStrongDillSize;
 // embedder/BUILD.gn variable impeller_supports_rendering is disabled.
 #ifdef SHELL_ENABLE_GL
 #include "flutter/shell/platform/embedder/embedder_external_texture_gl.h"
+#include "GLES3/gl3.h"
 #include "third_party/skia/include/gpu/ganesh/gl/GrGLBackendSurface.h"
 #include "third_party/skia/include/gpu/ganesh/gl/GrGLTypes.h"
-#ifdef IMPELLER_SUPPORTS_RENDERING
+#if defined(IMPELLER_SUPPORTS_RENDERING) && IMPELLER_SUPPORTS_RENDERING
 #include "flutter/shell/platform/embedder/embedder_render_target_impeller.h"  // nogncheck
 #include "flutter/shell/platform/embedder/embedder_surface_gl_impeller.h"  // nogncheck
 #include "flutter/shell/platform/embedder/embedder_surface_gl_skia.h"  // nogncheck
@@ -82,7 +86,7 @@ extern const intptr_t kPlatformStrongDillSize;
 #include "impeller/renderer/backend/gles/texture_gles.h"  // nogncheck
 #include "impeller/renderer/context.h"                    // nogncheck
 #include "impeller/renderer/render_target.h"              // nogncheck
-#endif  // IMPELLER_SUPPORTS_RENDERING
+#endif  // defined(IMPELLER_SUPPORTS_RENDERING) && IMPELLER_SUPPORTS_RENDERING
 #endif  // SHELL_ENABLE_GL
 
 #ifdef SHELL_ENABLE_METAL
@@ -90,13 +94,13 @@ extern const intptr_t kPlatformStrongDillSize;
 #include "third_party/skia/include/gpu/ganesh/mtl/GrMtlBackendSurface.h"
 #include "third_party/skia/include/gpu/ganesh/mtl/GrMtlTypes.h"
 #include "third_party/skia/include/ports/SkCFObject.h"
-#ifdef IMPELLER_SUPPORTS_RENDERING
+#if defined(IMPELLER_SUPPORTS_RENDERING) && IMPELLER_SUPPORTS_RENDERING
 #include "flutter/shell/platform/embedder/embedder_render_target_impeller.h"  // nogncheck
 #include "flutter/shell/platform/embedder/embedder_surface_metal_impeller.h"  // nogncheck
 #include "impeller/core/texture.h"                                // nogncheck
 #include "impeller/renderer/backend/metal/texture_wrapper_mtl.h"  // nogncheck
 #include "impeller/renderer/render_target.h"                      // nogncheck
-#endif  // IMPELLER_SUPPORTS_RENDERING
+#endif  // defined(IMPELLER_SUPPORTS_RENDERING) && IMPELLER_SUPPORTS_RENDERING
 #endif  // SHELL_ENABLE_METAL
 
 #ifdef SHELL_ENABLE_VULKAN
@@ -252,9 +256,16 @@ static void* DefaultGLProcResolver(const char* name) {
   static fml::RefPtr<fml::NativeLibrary> proc_library =
 #if FML_OS_LINUX
       fml::NativeLibrary::CreateForCurrentProcess();
+#elif defined(FLUTTER_WINDOWS_PHONE)
+      fml::NativeLibrary::Create("libGLESv2.dll");
 #elif FML_OS_WIN  // FML_OS_LINUX
       fml::NativeLibrary::Create("opengl32.dll");
 #endif            // FML_OS_WIN
+#if defined(FLUTTER_WINDOWS_PHONE)
+  if (!proc_library) {
+    return nullptr;
+  }
+#endif
   return static_cast<void*>(
       const_cast<uint8_t*>(proc_library->ResolveSymbol(name)));
 }
@@ -486,6 +497,7 @@ InferOpenGLPlatformViewCreationCallback(
            std::move(external_view_embedder)](flutter::Shell& shell) mutable {
         std::shared_ptr<flutter::EmbedderExternalViewEmbedder> view_embedder =
             std::move(external_view_embedder);
+#if defined(IMPELLER_SUPPORTS_RENDERING) && IMPELLER_SUPPORTS_RENDERING
         if (enable_impeller) {
           return std::make_unique<flutter::PlatformViewEmbedder>(
               shell,                   // delegate
@@ -497,6 +509,7 @@ InferOpenGLPlatformViewCreationCallback(
               view_embedder             // external view embedder
           );
         }
+#endif  // defined(IMPELLER_SUPPORTS_RENDERING) && IMPELLER_SUPPORTS_RENDERING
         return std::make_unique<flutter::PlatformViewEmbedder>(
             shell,                   // delegate
             shell.GetTaskRunners(),  // task runners
@@ -778,6 +791,10 @@ InferSoftwarePlatformViewCreationCallback(
         platform_dispatch_table,
     std::unique_ptr<flutter::EmbedderExternalViewEmbedder>
         external_view_embedder) {
+#ifndef SHELL_ENABLE_SOFTWARE
+  FML_LOG(ERROR) << "This Flutter Engine does not support software rendering.";
+  return nullptr;
+#else
   if (config->type != kSoftware) {
     return nullptr;
   }
@@ -805,6 +822,7 @@ InferSoftwarePlatformViewCreationCallback(
             std::move(external_view_embedder)  // external view embedder
         );
       });
+#endif  // SHELL_ENABLE_SOFTWARE
 }
 
 static flutter::Shell::CreateCallback<flutter::PlatformView>
@@ -1118,7 +1136,8 @@ static sk_sp<SkSurface> MakeSkSurfaceFromBackingStore(
 #endif
 }
 
-#if defined(SHELL_ENABLE_GL) && defined(IMPELLER_SUPPORTS_RENDERING)
+#if defined(SHELL_ENABLE_GL) && defined(IMPELLER_SUPPORTS_RENDERING) && \
+    IMPELLER_SUPPORTS_RENDERING
 static std::optional<impeller::PixelFormat> FlutterFormatToImpellerPixelFormat(
     uint32_t format) {
   switch (format) {
@@ -1133,7 +1152,8 @@ static std::optional<impeller::PixelFormat> FlutterFormatToImpellerPixelFormat(
   }
 }
 
-#endif  // defined(SHELL_ENABLE_GL) && defined(IMPELLER_SUPPORTS_RENDERING)
+#endif  // defined(SHELL_ENABLE_GL) && defined(IMPELLER_SUPPORTS_RENDERING) &&
+        // IMPELLER_SUPPORTS_RENDERING
 
 static std::unique_ptr<flutter::EmbedderRenderTarget>
 MakeRenderTargetFromBackingStoreImpeller(
@@ -1142,7 +1162,8 @@ MakeRenderTargetFromBackingStoreImpeller(
     const std::shared_ptr<impeller::AiksContext>& aiks_context,
     const FlutterBackingStoreConfig& config,
     const FlutterOpenGLFramebuffer* framebuffer) {
-#if defined(SHELL_ENABLE_GL) && defined(IMPELLER_SUPPORTS_RENDERING)
+#if defined(SHELL_ENABLE_GL) && defined(IMPELLER_SUPPORTS_RENDERING) && \
+    IMPELLER_SUPPORTS_RENDERING
   auto format = FlutterFormatToImpellerPixelFormat(framebuffer->target);
   if (!format.has_value()) {
     return nullptr;
@@ -1236,7 +1257,8 @@ MakeRenderTargetFromBackingStoreImpeller(
     const std::shared_ptr<impeller::AiksContext>& aiks_context,
     const FlutterBackingStoreConfig& config,
     const FlutterMetalBackingStore* metal) {
-#if defined(SHELL_ENABLE_METAL) && defined(IMPELLER_SUPPORTS_RENDERING)
+#if defined(SHELL_ENABLE_METAL) && defined(IMPELLER_SUPPORTS_RENDERING) && \
+    IMPELLER_SUPPORTS_RENDERING
   if (!metal->texture.texture) {
     FML_LOG(ERROR) << "Embedder supplied null Metal texture.";
     return nullptr;
@@ -1629,6 +1651,26 @@ MakeViewportMetricsFromWindowMetrics(
   metrics.physical_view_inset_left =
       SAFE_ACCESS(flutter_metrics, physical_view_inset_left, 0.0);
   metrics.display_id = SAFE_ACCESS(flutter_metrics, display_id, 0);
+#if defined(FLUTTER_WINDOWS_PHONE)
+  metrics.physical_padding_top =
+      SAFE_ACCESS(flutter_metrics, physical_view_padding_top, 0.0);
+  metrics.physical_padding_right =
+      SAFE_ACCESS(flutter_metrics, physical_view_padding_right, 0.0);
+  metrics.physical_padding_bottom =
+      SAFE_ACCESS(flutter_metrics, physical_view_padding_bottom, 0.0);
+  metrics.physical_padding_left =
+      SAFE_ACCESS(flutter_metrics, physical_view_padding_left, 0.0);
+  if (!(metrics.physical_padding_top >= 0.0 &&
+        metrics.physical_padding_right >= 0.0 &&
+        metrics.physical_padding_bottom >= 0.0 &&
+        metrics.physical_padding_left >= 0.0 &&
+        metrics.physical_padding_top + metrics.physical_padding_bottom <=
+            metrics.physical_height &&
+        metrics.physical_padding_left + metrics.physical_padding_right <=
+            metrics.physical_width)) {
+    return "Physical view padding was invalid.";
+  }
+#endif
 
   if (metrics.device_pixel_ratio <= 0.0) {
     return "Device pixel ratio was invalid. It must be greater than zero.";
@@ -2034,6 +2076,12 @@ FlutterEngineResult FlutterEngineInitialize(size_t version,
     icu_data_path = SAFE_ACCESS(args, icu_data_path, nullptr);
   }
 
+  const char* callback_cache = SAFE_ACCESS(args, dart_callback_cache_path, nullptr);
+  if (callback_cache != nullptr && callback_cache[0] != '\0') {
+    flutter::DartCallbackCache::SetCachePath(callback_cache);
+    flutter::DartCallbackCache::LoadCacheFromDisk();
+  }
+
 #if !SLIMPELLER
   if (SAFE_ACCESS(args, persistent_cache_path, nullptr) != nullptr) {
     std::string persistent_cache_path =
@@ -2410,11 +2458,14 @@ FlutterEngineResult FlutterEngineInitialize(size_t version,
   auto run_configuration =
       flutter::RunConfiguration::InferFromSettings(settings);
 
-  if (SAFE_ACCESS(args, custom_dart_entrypoint, nullptr) != nullptr) {
-    auto dart_entrypoint = std::string{args->custom_dart_entrypoint};
-    if (!dart_entrypoint.empty()) {
-      run_configuration.SetEntrypoint(std::move(dart_entrypoint));
-    }
+  const char* entrypoint = SAFE_ACCESS(args, custom_dart_entrypoint, nullptr);
+  const char* entrypoint_library =
+      SAFE_ACCESS(args, custom_dart_entrypoint_library, nullptr);
+  if (entrypoint_library && *entrypoint_library) {
+    run_configuration.SetEntrypointAndLibrary(
+        entrypoint && *entrypoint ? entrypoint : "main", entrypoint_library);
+  } else if (entrypoint && *entrypoint) {
+    run_configuration.SetEntrypoint(entrypoint);
   }
 
   if (SAFE_ACCESS(args, dart_entrypoint_argc, 0) > 0) {

@@ -1,0 +1,189 @@
+name: Assemble native macOS Windows ARM32 SDKs
+
+on:
+  # Register the workflow before the single port commit reaches the default
+  # branch. Component builds/assembly still require explicit run inputs.
+  push:
+    branches: [sdk-host-tools-validation]
+    paths: [.github/workflows/windows-arm32-macos-sdk.yml]
+  workflow_dispatch:
+    inputs:
+      engine_run:
+        description: Successful common RT and Phone engine and Linux SDK build
+        required: true
+      compiler_run:
+        description: Successful complete macOS host compiler build
+        required: true
+      generator_run:
+        description: Successful native macOS ARM32 AOT generator build
+        required: true
+      msix_run:
+        description: Successful full macOS MSIX packager build
+        required: true
+      dependency_run:
+        description: Successful complete macOS Rust and Python distribution build
+        required: true
+      frontend_run:
+        description: Successful source-built frontend snapshots for both macOS hosts
+        default: '38445964591'
+
+permissions:
+  contents: read
+  actions: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  sdk:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [macos-x64, macos-arm64]
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      GIT_CONFIG_COUNT: '1'
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: ${{ github.workspace }}
+      CARGO_HOME: ${{ github.workspace }}/_work/cargo
+      RUSTUP_HOME: ${{ github.workspace }}/_work/rustup
+      TARGET_HOST: ${{ matrix.host }}
+    steps:
+      - name: Prepare ordinary Ubuntu amd64 container
+        run: |
+          test "$(uname -m)" = x86_64
+          apt-get update
+          apt-get install -y --no-install-recommends git gh curl ca-certificates python3 xz-utils unzip
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Stage the exact official destination SDK cache and current port source
+        run: |
+          mkdir -p _work/tmp
+          echo "TMPDIR=$GITHUB_WORKSPACE/_work/tmp" >> "$GITHUB_ENV"
+          export TMPDIR="$GITHUB_WORKSPACE/_work/tmp"
+          git fetch --no-tags origin c6f67dede3d4aa1aa7a69dd56a3494a5cde6cc80:refs/tags/3.38.10
+          python3 -B - <<'PY'
+          import os, subprocess, sys
+          sys.path.insert(0, 'dev/windows_arm32')
+          from sdk_hosts import select_host
+          host = select_host(os.environ['TARGET_HOST'])
+          subprocess.run(['curl', '--fail', '--location', '--retry', '3',
+                          'https://storage.googleapis.com/flutter_infra_release/releases/' + host['officialArchive'],
+                          '--output', '_work/official.zip'], check=True)
+          subprocess.run([sys.executable, '-B', 'dev/windows_arm32/bootstrap_host_sdk.py',
+                          '--archive', '_work/official.zip', '--host', host['id'], '--sdk', '_work/flutter'], check=True)
+          PY
+          rm _work/official.zip
+      - name: Download only successful same-repository source-build components
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ENGINE_RUN: ${{ inputs.engine_run }}
+          COMPILER_RUN: ${{ inputs.compiler_run }}
+          GENERATOR_RUN: ${{ inputs.generator_run }}
+          MSIX_RUN: ${{ inputs.msix_run }}
+          DEPENDENCY_RUN: ${{ inputs.dependency_run }}
+          FRONTEND_RUN: ${{ inputs.frontend_run }}
+        run: |
+          python3 -B - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          host = os.environ['TARGET_HOST']
+          components = {
+              'compiler': ('COMPILER_RUN', 'windows-arm32-compiler-' + host),
+              'generator': ('GENERATOR_RUN', 'windows-arm32-snapshot-' + host),
+              'msix': ('MSIX_RUN', 'windows-arm32-msix-' + host),
+              'python': ('DEPENDENCY_RUN', 'windows-arm32-python-' + host),
+              'rust-1.95.0': ('DEPENDENCY_RUN', 'windows-arm32-rust-1.95.0-' + host),
+              'rust-1.93.1': ('DEPENDENCY_RUN', 'windows-arm32-rust-1.93.1-' + host),
+              'frontend': ('FRONTEND_RUN', 'windows-arm32-frontend-' + host),
+              'engines': ('ENGINE_RUN', 'windows-arm32-engines-linux-x64'),
+              'linux-sdk': ('ENGINE_RUN', 'flutter-windows-arm32-linux-x64'),
+          }
+          runs = {}
+          repository = os.environ['GITHUB_REPOSITORY']
+          for name, (key, artifact) in components.items():
+              run = os.environ[key]
+              if not run.isdecimal():
+                  raise ValueError('Expected a numeric component run')
+              if run not in runs:
+                  record = json.loads(subprocess.check_output(['gh', 'api',
+                      'repos/' + repository + '/actions/runs/' + run]))
+                  if (record['status'] != 'completed' or record['conclusion'] != 'success'
+                          or record['head_repository']['full_name'] != repository
+                          or record['event'] not in ('push', 'workflow_dispatch')):
+                      raise ValueError('Expected a successful source build in this repository')
+                  runs[run] = record
+              subprocess.run(['gh', 'run', 'download', run, '--repo', repository,
+                              '--name', artifact, '--dir', '_work/inputs/' + name], check=True)
+          Path('_work/component-runs.json').write_text(json.dumps(runs, indent=2) + '\n')
+          PY
+      - name: Stage complete host dependencies and identical Windows target data
+        run: |
+          python3 -B dev/windows_arm32/testing/stage_host_sdk_inputs.py \
+            --work _work --sdk _work/flutter --host "$TARGET_HOST"
+          python3 -B dev/windows_arm32/prepare_uwp_headers.py --sdk _work/flutter --work _work/header-inputs
+      - name: Install source-matched Linux Rust references for target introspection
+        run: |
+          curl --fail --location --retry 3 \
+            https://static.rust-lang.org/rustup/archive/1.28.2/x86_64-unknown-linux-gnu/rustup-init \
+            --output _work/rustup-init
+          echo '20a06e644b0d9bd2fbdbfd52d42540bdde820ea7df86e92e533c073da0cdd43c  _work/rustup-init' | sha256sum --check
+          chmod +x _work/rustup-init
+          _work/rustup-init -y --no-modify-path --default-toolchain none
+          for version in 1.95.0 1.93.1; do
+            "$CARGO_HOME/bin/rustup" toolchain install "$version-x86_64-unknown-linux-gnu" \
+              --no-self-update --profile minimal
+          done
+      - name: Configure and assemble both engine families without executing destination tools
+        run: |
+          dependencies="$GITHUB_WORKSPACE/_work/flutter/bin/cache/windows-arm32-dependencies"
+          python3 -B dev/windows_arm32/configure_sdk_dependencies.py \
+            --sdk _work/flutter --host "$TARGET_HOST" --output "$dependencies/configuration" \
+            --compiler "$dependencies/compiler" --gnu-sysroot "$dependencies/target-sysroot" \
+            --windows-sdk "$dependencies/windows-sdk" --atl "$dependencies/atl" \
+            --cppwinrt "$dependencies/cppwinrt" --python "$dependencies/python/bin/python3.14" \
+            --packager "$dependencies/msix/bin/makemsix" --rust-dependencies "$dependencies/rust-dependencies" \
+            --rust-stable "$dependencies/rust-1.95.0" --rust-193 "$dependencies/rust-1.93.1" \
+            --reference-rust-stable "$RUSTUP_HOME/toolchains/1.95.0-x86_64-unknown-linux-gnu/bin/rustc" \
+            --reference-rust-193 "$RUSTUP_HOME/toolchains/1.93.1-x86_64-unknown-linux-gnu/bin/rustc"
+          python3 -B dev/windows_arm32/assemble_sdk.py --sdk _work/flutter --cross-prepare \
+            --dependency-config "$dependencies/configuration/sdk-dependencies.json" \
+            --engine-build _work/engines \
+            --frontend-server _work/inputs/frontend/frontend_server_aot.dart.snapshot \
+            --patched-sdk _work/engines/out/win_release_arm_rt/flutter_patched_sdk \
+            --host-generator _work/generator/gen_snapshot \
+            --host-generator-provenance _work/generator/snapshot-provenance.json
+      - name: Package complete cross-prepared SDKs for required native host validation
+        run: |
+          python3 -B - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          sdk = Path('_work/flutter')
+          if subprocess.check_output(['git', '-C', str(sdk), 'status', '--porcelain'], text=True).strip():
+              raise ValueError('Assembly changed the tracked Flutter source')
+          for path in sdk.rglob('*'):
+              if path.is_symlink() and not path.resolve().is_relative_to(sdk.resolve()):
+                  raise ValueError('SDK dependency escapes the distribution')
+          report = {'host': os.environ['TARGET_HOST'], 'bothRuntimeFamiliesInstalled': True,
+                    'nativeDestinationExecutionVerified': False, 'relocatedApplicationBuildVerified': False,
+                    'releaseReady': False, 'systemLibrariesCopied': False}
+          (sdk / 'bin/cache/windows-arm32-cross-preparation.json').write_text(json.dumps(report, indent=2) + '\n')
+          PY
+          tar -czf "_work/flutter-windows-arm32-$TARGET_HOST-cross-prepared.tar.gz" -C _work flutter
+          (cd _work && sha256sum "flutter-windows-arm32-$TARGET_HOST-cross-prepared.tar.gz" \
+            > "flutter-windows-arm32-$TARGET_HOST-cross-prepared.tar.gz.sha256")
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: flutter-windows-arm32-${{ matrix.host }}-cross-prepared
+          path: |
+            _work/flutter-windows-arm32-${{ matrix.host }}-cross-prepared.tar.gz
+            _work/flutter-windows-arm32-${{ matrix.host }}-cross-prepared.tar.gz.sha256
+            _work/component-runs.json
+          if-no-files-found: error

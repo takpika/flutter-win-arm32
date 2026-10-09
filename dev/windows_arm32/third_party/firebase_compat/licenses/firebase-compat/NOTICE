@@ -1,0 +1,10 @@
+The notification formatter uses generated Unicode 13.0.0 character data.
+Copyright © 1991-2026 Unicode, Inc. SpecialCasing-13.0.0.txt also carries
+Copyright © 2019 Unicode, Inc. See UNICODE-LICENSE.txt for its license.
+Data provenance and hashes: unicode13-sources.json.
+Generated data is independent of the Windows NLS casing implementation.
+
+Greek uppercase preprocessing follows ICU 67's el_Upper transliterator rules:
+© 2016 and later: Unicode, Inc. and others.
+Copyright (C) 2011-2013, Apple Inc. and others. All Rights Reserved.
+See ICU-LICENSE.txt; rule provenance and hash are in unicode13-sources.json.

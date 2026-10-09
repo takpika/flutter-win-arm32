@@ -1,0 +1,63 @@
+--- a/clang/lib/Sema/SemaOverload.cpp
++++ b/clang/lib/Sema/SemaOverload.cpp
+@@ -1249,6 +1249,14 @@
+       !New->getFriendObjectKind();
+ 
+     if (FunctionDecl *OldF = OldD->getAsFunction()) {
++      // MSVC keeps inherited constructor templates with different template
++      // parameter lists available. Ordinary member using-declarations still
++      // use the standard hiding rules, as do non-MSVC language modes.
++      if (getLangOpts().MSVCCompat && OldIsUsingDecl && !NewIsUsingDecl &&
++          isa<CXXConstructorDecl>(New) && isa<CXXConstructorDecl>(OldF) &&
++          cast<CXXConstructorDecl>(New)->isExplicit() &&
++          !cast<CXXConstructorDecl>(OldF)->isExplicit())
++        UseMemberUsingDeclRules = false;
+       if (!IsOverload(New, OldF, UseMemberUsingDeclRules)) {
+         if (UseMemberUsingDeclRules && OldIsUsingDecl) {
+           HideUsingShadowDecl(S, cast<UsingShadowDecl>(*I));
+@@ -5562,7 +5570,12 @@
+   //     -- Otherwise, the reference shall be an lvalue reference to a
+   //        non-volatile const type (i.e., cv1 shall be const), or the reference
+   //        shall be an rvalue reference.
+-  if (!isRValRef && (!T1.isConstQualified() || T1.isVolatileQualified())) {
++  const bool MSVCRecordTemporaryBinding =
++      S.getLangOpts().MSVCCompat && InitCategory.isPRValue() &&
++      T2->isRecordType() && RefRelationship == Sema::Ref_Compatible &&
++      !T1.isVolatileQualified();
++  if (!isRValRef && (!T1.isConstQualified() || T1.isVolatileQualified()) &&
++      !MSVCRecordTemporaryBinding) {
+     if (InitCategory.isRValue() && RefRelationship != Sema::Ref_Incompatible)
+       ICS.setBad(BadConversionSequence::lvalue_ref_to_rvalue, Init, DeclType);
+     return ICS;
+@@ -11023,6 +11036,31 @@
+       (Cand1.IgnoreObjectArgument || Cand2.IgnoreObjectArgument))
+     StartArg = 1;
+ 
++  // MSVC prefers candidates requiring no temporary-reference extension,
++  // even when their conversions for other arguments have worse ranks.
++  // If both candidates use the extension, compare their conversions normally.
++  if (S.getLangOpts().MSVCCompat) {
++    auto UsesTemporaryReference = [StartArg](const OverloadCandidate &Cand) {
++      for (unsigned I = StartArg; I < Cand.Conversions.size(); ++I) {
++        const auto &ICS = Cand.Conversions[I];
++        if (!ICS.isStandard())
++          continue;
++        const auto &SCS = ICS.Standard;
++        if (SCS.ReferenceBinding && SCS.IsLvalueReference && SCS.BindsToRvalue &&
++            !SCS.BindsImplicitObjectArgumentWithoutRefQualifier &&
++            SCS.getToType(2)->isRecordType() &&
++            !SCS.getToType(2).isConstQualified() &&
++            !SCS.getToType(2).isVolatileQualified())
++          return true;
++      }
++      return false;
++    };
++    bool Extension1 = UsesTemporaryReference(Cand1);
++    bool Extension2 = UsesTemporaryReference(Cand2);
++    if (Extension1 != Extension2)
++      return !Extension1;
++  }
++
+   auto IsIllFormedConversion = [&](const ImplicitConversionSequence &ICS) {
+     // We don't allow incompatible pointer conversions in C++.
+     if (!S.getLangOpts().CPlusPlus)

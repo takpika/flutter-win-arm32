@@ -6,6 +6,8 @@
 
 #include <WinUser.h>
 #include <dwmapi.h>
+#include <oleacc.h>
+#include <uiautomation.h>
 
 #include <chrono>
 #include <map>
@@ -277,12 +279,14 @@ bool FlutterWindow::OnBitmapSurfaceCleared() {
 
 bool FlutterWindow::OnBitmapSurfaceUpdated(const void* allocation,
                                            size_t row_bytes,
-                                           size_t height) {
+                                           size_t height,
+                                           bool top_down) {
   HDC dc = ::GetDC(GetWindowHandle());
   BITMAPINFO bmi = {};
   bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
   bmi.bmiHeader.biWidth = row_bytes / 4;
-  bmi.bmiHeader.biHeight = -height;
+  bmi.bmiHeader.biHeight =
+      top_down ? -static_cast<LONG>(height) : static_cast<LONG>(height);
   bmi.bmiHeader.biPlanes = 1;
   bmi.bmiHeader.biBitCount = 32;
   bmi.bmiHeader.biCompression = BI_RGB;
@@ -332,8 +336,12 @@ AlertPlatformNodeDelegate* FlutterWindow::GetAlertDelegate() {
 }
 
 ui::AXPlatformNodeWin* FlutterWindow::GetAlert() {
+#if defined(_M_ARM)
+  return nullptr;
+#else
   CreateAxFragmentRoot();
   return alert_node_.get();
+#endif
 }
 
 void FlutterWindow::OnWindowStateEvent(WindowStateEvent event) {
@@ -415,7 +423,7 @@ void FlutterWindow::InitializeChild(const char* title,
 
   auto* result = CreateWindowEx(
       0, window_class.lpszClassName, converted_title.c_str(),
-      WS_CHILD | WS_VISIBLE, CW_DEFAULT, CW_DEFAULT, width, height,
+      WS_CHILD | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, width, height,
       HWND_MESSAGE, nullptr, window_class.hInstance, this);
 
   if (result == nullptr) {
@@ -428,7 +436,12 @@ void FlutterWindow::InitializeChild(const char* title,
         reinterpret_cast<LPWSTR>(&message), 0, NULL);
     OutputDebugString(message);
     LocalFree(message);
+    return;
   }
+
+  current_width_ = width;
+  current_height_ = height;
+
   SetUserObjectInformationA(GetCurrentProcess(),
                             UOI_TIMERPROC_EXCEPTION_SUPPRESSION, FALSE, 1);
   // SetTimer is not precise, if a 16 ms interval is requested, it will instead
@@ -765,6 +778,9 @@ FlutterWindow::HandleMessage(UINT const message,
 LRESULT FlutterWindow::OnGetObject(UINT const message,
                                    WPARAM const wparam,
                                    LPARAM const lparam) {
+#if defined(_M_ARM)
+  return static_cast<LRESULT>(0L);
+#else
   LRESULT reference_result = static_cast<LRESULT>(0L);
 
   // Only the lower 32 bits of lparam are valid when checking the object id
@@ -816,6 +832,7 @@ LRESULT FlutterWindow::OnGetObject(UINT const message,
     }
   }
   return reference_result;
+#endif
 }
 
 void FlutterWindow::OnImeSetContext(UINT const message,
@@ -915,6 +932,11 @@ LRESULT FlutterWindow::Win32DefWindowProc(HWND hWnd,
 }
 
 void FlutterWindow::Destroy() {
+  if (direct_manipulation_owner_) {
+    // Unregister COM callbacks while their owner and HWND are still valid.
+    direct_manipulation_owner_->Destroy();
+    direct_manipulation_owner_.reset();
+  }
   if (window_handle_) {
     text_input_manager_->SetWindowHandle(nullptr);
     DestroyWindow(window_handle_);
@@ -925,17 +947,23 @@ void FlutterWindow::Destroy() {
 }
 
 void FlutterWindow::CreateAxFragmentRoot() {
+#if defined(_M_ARM)
+  return;
+#else
   if (ax_fragment_root_) {
     return;
   }
   ax_fragment_root_ = std::make_unique<ui::AXFragmentRootWin>(
       window_handle_, GetAxFragmentRootDelegate());
+#if !defined(_M_ARM)
   alert_delegate_ =
       std::make_unique<AlertPlatformNodeDelegate>(*ax_fragment_root_);
   ui::AXPlatformNode* alert_node =
-      ui::AXPlatformNodeWin::Create(alert_delegate_.get());
+      ui::AXPlatformNode::Create(alert_delegate_.get());
   alert_node_.reset(static_cast<ui::AXPlatformNodeWin*>(alert_node));
   ax_fragment_root_->SetAlertNode(alert_node_.get());
+#endif
+#endif
 }
 
 }  // namespace flutter

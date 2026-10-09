@@ -99,11 +99,22 @@ std::optional<LRESULT> WindowManager::HandleMessage(HWND hwnd,
 
 }  // namespace flutter
 
+namespace {
+
+bool IsValidWindowHandle(HWND hwnd) {
+  return hwnd != nullptr && ::IsWindow(hwnd);
+}
+
+}  // namespace
+
 void InternalFlutterWindows_WindowManager_Initialize(
     int64_t engine_id,
     const flutter::WindowingInitRequest* request) {
   flutter::FlutterWindowsEngine* engine =
       flutter::FlutterWindowsEngine::GetEngineForId(engine_id);
+  if (engine == nullptr || request == nullptr) {
+    return;
+  }
   engine->window_manager()->Initialize(request);
 }
 
@@ -111,6 +122,9 @@ bool InternalFlutterWindows_WindowManager_HasTopLevelWindows(
     int64_t engine_id) {
   flutter::FlutterWindowsEngine* engine =
       flutter::FlutterWindowsEngine::GetEngineForId(engine_id);
+  if (engine == nullptr) {
+    return false;
+  }
   return engine->window_manager()->HasTopLevelWindows();
 }
 
@@ -119,6 +133,9 @@ FlutterViewId InternalFlutterWindows_WindowManager_CreateRegularWindow(
     const flutter::WindowCreationRequest* request) {
   flutter::FlutterWindowsEngine* engine =
       flutter::FlutterWindowsEngine::GetEngineForId(engine_id);
+  if (engine == nullptr || request == nullptr) {
+    return -1;
+  }
   return engine->window_manager()->CreateRegularWindow(request);
 }
 
@@ -127,6 +144,9 @@ HWND InternalFlutterWindows_WindowManager_GetTopLevelWindowHandle(
     FlutterViewId view_id) {
   flutter::FlutterWindowsEngine* engine =
       flutter::FlutterWindowsEngine::GetEngineForId(engine_id);
+  if (engine == nullptr) {
+    return nullptr;
+  }
   flutter::FlutterWindowsView* view = engine->view(view_id);
   if (view == nullptr) {
     return nullptr;
@@ -137,12 +157,18 @@ HWND InternalFlutterWindows_WindowManager_GetTopLevelWindowHandle(
 
 flutter::ActualWindowSize
 InternalFlutterWindows_WindowManager_GetWindowContentSize(HWND hwnd) {
+  if (!IsValidWindowHandle(hwnd)) {
+    return {};
+  }
   return flutter::HostWindow::GetWindowContentSize(hwnd);
 }
 
 void InternalFlutterWindows_WindowManager_SetWindowSize(
     HWND hwnd,
     const flutter::WindowSizeRequest* size) {
+  if (!IsValidWindowHandle(hwnd) || size == nullptr) {
+    return;
+  }
   flutter::HostWindow* window = flutter::HostWindow::GetThisFromHandle(hwnd);
   if (window) {
     window->SetContentSize(*size);
@@ -152,6 +178,9 @@ void InternalFlutterWindows_WindowManager_SetWindowSize(
 void InternalFlutterWindows_WindowManager_SetWindowConstraints(
     HWND hwnd,
     const flutter::WindowConstraints* constraints) {
+  if (!IsValidWindowHandle(hwnd) || constraints == nullptr) {
+    return;
+  }
   flutter::HostWindow* window = flutter::HostWindow::GetThisFromHandle(hwnd);
   if (window) {
     window->SetConstraints(*constraints);
@@ -161,6 +190,9 @@ void InternalFlutterWindows_WindowManager_SetWindowConstraints(
 void InternalFlutterWindows_WindowManager_SetFullscreen(
     HWND hwnd,
     const flutter::FullscreenRequest* request) {
+  if (!IsValidWindowHandle(hwnd) || request == nullptr) {
+    return;
+  }
   flutter::HostWindow* window = flutter::HostWindow::GetThisFromHandle(hwnd);
   const std::optional<FlutterEngineDisplayId> display_id =
       request->has_display_id
@@ -172,6 +204,9 @@ void InternalFlutterWindows_WindowManager_SetFullscreen(
 }
 
 bool InternalFlutterWindows_WindowManager_GetFullscreen(HWND hwnd) {
+  if (!IsValidWindowHandle(hwnd)) {
+    return false;
+  }
   flutter::HostWindow* window = flutter::HostWindow::GetThisFromHandle(hwnd);
   if (window) {
     return window->GetFullscreen();
