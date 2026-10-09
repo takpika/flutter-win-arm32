@@ -1,0 +1,64 @@
+name: Windows host runtime in Ubuntu
+description: Pinned Wine 11 runtime with standard addons for native Windows CLI verification
+runs:
+  using: composite
+  steps:
+    - name: Prepare Windows host runtime
+      shell: bash
+      run: |
+          test "$(uname -m)" = x86_64
+          mkdir -p "$TMPDIR"
+          export DEBIAN_FRONTEND=noninteractive
+          dpkg --add-architecture i386
+          apt-get update
+          apt-get install -y --no-install-recommends curl ca-certificates python3 \
+            xz-utils gnupg xvfb xauth imagemagick
+          mkdir -p /etc/apt/keyrings
+          curl --fail --location --retry 3 --retry-connrefused --connect-timeout 30 --max-time 300 https://dl.winehq.org/wine-builds/winehq.key \
+            --output /etc/apt/keyrings/winehq.asc
+          echo 'd965d646defe94b3dfba6d5b4406900ac6c81065428bf9d9303ad7a72ee8d1b8  /etc/apt/keyrings/winehq.asc' | sha256sum --check
+          gpg --batch --dearmor --output /etc/apt/keyrings/winehq-archive.key /etc/apt/keyrings/winehq.asc
+          curl --fail --location --retry 3 --retry-connrefused --connect-timeout 30 --max-time 300 \
+            https://dl.winehq.org/wine-builds/ubuntu/dists/noble/winehq-noble.sources \
+            --output /etc/apt/sources.list.d/winehq-noble.sources
+          echo 'b5962429ece1f831c9f713c13f9f0d26bb367117ef56706648ff385f004779fb  /etc/apt/sources.list.d/winehq-noble.sources' | sha256sum --check
+          apt-get update
+          apt-get install -y --install-recommends winehq-stable=11.0.0.0~noble-1
+          # Supply Wine 11's standard addons before prefix initialization;
+          # otherwise its interactive Mono installer blocks unattended tests.
+          # SHA-256 values come from Wine 11.0 dlls/appwiz.cpl/addons.c.
+          mkdir -p /opt/wine/mono /opt/wine/gecko
+          curl --fail --location --retry 3 --retry-connrefused --connect-timeout 30 --max-time 300 \
+            https://dl.winehq.org/wine/wine-mono/10.4.1/wine-mono-10.4.1-x86.msi \
+            --output /opt/wine/mono/wine-mono-10.4.1-x86.msi
+          echo '071f4b2887e1c97a11d791ff3d65be9429eed6dec4c2708888bfd546ba358e23  /opt/wine/mono/wine-mono-10.4.1-x86.msi' | sha256sum --check
+          curl --fail --location --retry 3 --retry-connrefused --connect-timeout 30 --max-time 300 \
+            https://dl.winehq.org/wine/wine-gecko/2.47.4/wine-gecko-2.47.4-x86.msi \
+            --output /opt/wine/gecko/wine-gecko-2.47.4-x86.msi
+          echo '26cecc47706b091908f7f814bddb074c61beb8063318e9efc5a7f789857793d6  /opt/wine/gecko/wine-gecko-2.47.4-x86.msi' | sha256sum --check
+          curl --fail --location --retry 3 --retry-connrefused --connect-timeout 30 --max-time 300 \
+            https://dl.winehq.org/wine/wine-gecko/2.47.4/wine-gecko-2.47.4-x86_64.msi \
+            --output /opt/wine/gecko/wine-gecko-2.47.4-x86_64.msi
+          echo 'e590b7d988a32d6aa4cf1d8aa3aa3d33766fdd4cf4c89c2dcc2095ecb28d066f  /opt/wine/gecko/wine-gecko-2.47.4-x86_64.msi' | sha256sum --check
+
+    - name: Build upstream Wine WHERE quiet-mode support
+      shell: bash
+      run: |
+          # Wine 11 stable lacks /Q, used by the unchanged Flutter bootstrap.
+          # Build only the official upstream utility; it stays in the CI runtime.
+          apt-get install -y --no-install-recommends \
+            wine-stable-dev=11.0.0.0~noble-1 g++ g++-mingw-w64-x86-64 \
+            gettext librsvg2-bin icoutils patch
+          mkdir -p "$GITHUB_WORKSPACE/_work/wine-where"
+          curl --fail --location --retry 3 --retry-connrefused --connect-timeout 30 --max-time 300 \
+            https://raw.githubusercontent.com/wine-mirror/wine/e53db200ca08f0aeb196617fa0238a776be2b7f8/programs/where/main.c \
+            --output "$GITHUB_WORKSPACE/_work/wine-where/main.c"
+          echo "2152e36f61e1ff332b9851bbff6bb8a63f3d1a533ff07d73aa854978cb284afd  $GITHUB_WORKSPACE/_work/wine-where/main.c" | sha256sum --check
+          /opt/wine-stable/bin/winegcc -b x86_64-w64-mingw32 -municode \
+            -I/opt/wine-stable/include -D__WINESRC__ \
+            -o "$GITHUB_WORKSPACE/_work/wine-where/where.exe" \
+            "$GITHUB_WORKSPACE/_work/wine-where/main.c" -lshlwapi
+
+    - name: Build isolated Wine command-handle support
+      shell: bash
+      run: bash dev/windows_arm32/testing/build_wine_cmd.sh

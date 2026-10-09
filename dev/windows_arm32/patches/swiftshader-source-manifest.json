@@ -1,0 +1,17 @@
+{
+  "upstreamRevision": "d040a5bab638bf7c226235c95787ba6288bb6416",
+  "files": [
+    {
+      "path": "third_party/llvm-subzero/lib/Support/Windows/Signals.inc",
+      "originalSha256": "170a7745769869a84be7b83e1bb9cb686910e31085d9342836c0861ad2259550",
+      "patchedSha256": "8ca6eb8a6a9dadbebe95bf26a87722b37eba1b529af2f9f8c0d4184c4dee0f3c"
+    },
+    {
+      "path": "src/System/Timer.cpp",
+      "originalSha256": "b25ac48fce8a7407d882095cb9386d857691ff652d25913a6c2d992d58a772dc",
+      "patchedSha256": "969563a728987a29372e38d2044e46fa71dc5324ad1491d9456b0f3b94f95511"
+    }
+  ],
+  "armStackContextReference": "https://github.com/llvm/llvm-project/blob/e77ac8049afab1ed6dcd048a65c0e5c030293c84/llvm/lib/Support/Windows/Signals.inc",
+  "armTimerReference": "https://learn.microsoft.com/en-us/windows/win32/sysinfo/acquiring-high-resolution-time-stamps"
+}

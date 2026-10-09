@@ -26,7 +26,12 @@ class KeyboardKeyChannelHandler
  public:
   // Create a |KeyboardKeyChannelHandler| by specifying the messenger
   // through which the events are sent.
+#if WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP)
   explicit KeyboardKeyChannelHandler(flutter::BinaryMessenger* messenger);
+#endif
+  using GetKeyStateHandler = std::function<SHORT(int)>;
+  KeyboardKeyChannelHandler(flutter::BinaryMessenger* messenger,
+                            GetKeyStateHandler get_key_state);
 
   ~KeyboardKeyChannelHandler();
 
@@ -46,6 +51,7 @@ class KeyboardKeyChannelHandler
  private:
   // The Flutter system channel for key event messages.
   std::unique_ptr<flutter::BasicMessageChannel<rapidjson::Document>> channel_;
+  GetKeyStateHandler get_key_state_;
 
   FML_DISALLOW_COPY_AND_ASSIGN(KeyboardKeyChannelHandler);
 };

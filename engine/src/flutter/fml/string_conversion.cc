@@ -11,12 +11,12 @@
 
 #include "flutter/fml/build_config.h"
 
-#if defined(FML_OS_WIN)
+#if defined(FML_OS_WIN) && !defined(_LIBCPP_VERSION)
 // TODO(naifu): https://github.com/flutter/flutter/issues/98074
 // Eliminate this workaround for a link error on Windows when the underlying
 // bug is fixed.
 std::locale::id std::codecvt<char16_t, char, _Mbstatet>::id;
-#endif  // defined(FML_OS_WIN)
+#endif  // defined(FML_OS_WIN) && !defined(_LIBCPP_VERSION)
 
 namespace fml {
 
@@ -45,8 +45,9 @@ std::u16string Utf8ToUtf16(const std::string_view string) {
 }
 
 std::string PathToUtf8(const std::filesystem::path& path) {
-  const std::u8string path_u8 = path.u8string();
-  return std::string(path_u8.begin(), path_u8.end());
+  const auto path_u8 = path.u8string();
+  return std::string(reinterpret_cast<const char*>(path_u8.data()),
+                     path_u8.size());
 }
 
 }  // namespace fml

@@ -13,6 +13,10 @@ import 'dart:isolate';
 import 'dart:typed_data';
 import 'dart:ui';
 
+// The C embedder selects this retained entrypoint by its library URI.
+// ignore: unused_import
+import 'library_entrypoint.dart' as entrypointFixture;
+
 void main() {}
 
 @pragma('vm:entry-point')

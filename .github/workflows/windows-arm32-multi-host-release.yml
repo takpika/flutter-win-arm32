@@ -1,0 +1,137 @@
+name: Publish validated four-host Windows ARM32 SDK set
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: New release tag, for example v3.38.10-windows-arm32.2
+        required: true
+        type: string
+      sdk_records:
+        description: JSON schemaVersion 1, hosts entries with host, buildRunId, sourceRevision and validation
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: windows-arm32-release-${{ inputs.release_tag }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      SDK_RECORDS: ${{ inputs.sdk_records }}
+    steps:
+      - name: Prepare ordinary Ubuntu amd64 container
+        run: |
+          test "$(uname -m)" = x86_64
+          mkdir -p "$GITHUB_WORKSPACE/_work/tmp"
+          echo "TMPDIR=$GITHUB_WORKSPACE/_work/tmp" >> "$GITHUB_ENV"
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends python3 git gh ca-certificates
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Download exact successful SDK builds and validate the complete set
+        run: |
+          python3 -B - <<'PY'
+          import json, os, re, subprocess, sys
+          from pathlib import Path
+          sys.path.insert(0, 'dev/windows_arm32')
+          from sdk_hosts import hosts
+          from verify_release import digest
+          from verify_sdk_set import verify_set, verify_source_build
+          def api(path):
+              return json.loads(subprocess.check_output(['gh', 'api', 'repos/' + os.environ['GH_REPO'] + path], text=True))
+          tag = os.environ['RELEASE_TAG']
+          if not re.fullmatch(r'v3\.38\.10-windows-arm32\.[1-9][0-9]*', tag):
+              raise ValueError('Invalid release tag')
+          if any(item['ref'] == 'refs/tags/' + tag for item in api('/git/matching-refs/tags/' + tag)):
+              raise ValueError('Existing release tags are preserved')
+          records = json.loads(os.environ['SDK_RECORDS'])
+          approved = api('/git/ref/heads/windows-arm32-3.38.10')['object']['sha']
+          expected = {host['id'] for host in hosts()}
+          entries = records.get('hosts', [])
+          if (records.get('schemaVersion') != 1 or len(entries) != len(expected)
+                  or {entry['host'] for entry in entries} != expected):
+              raise ValueError('Provide exactly all four official SDK hosts')
+          output = Path('_work/release'); output.mkdir(parents=True)
+          manifest = {'schemaVersion': 1, 'hosts': []}
+          for entry in entries:
+              host, run_id = entry['host'], str(entry['buildRunId'])
+              if not run_id.isdecimal():
+                  raise ValueError('Invalid SDK workflow run ID')
+              run = api('/actions/runs/' + run_id)
+              if entry['sourceRevision'] != approved:
+                  raise ValueError('Publish only the current public port commit')
+              verify_source_build(run, os.environ['GH_REPO'], approved, host)
+              name = 'flutter-windows-arm32-' + host
+              artifact = name + ('-cross-prepared' if host.startswith('macos-') else '')
+              subprocess.run(['gh', 'run', 'download', run_id, '--name', artifact,
+                              '--dir', str(output / host)], check=True)
+              extension = '.zip' if host == 'windows-x64' else '.tar.gz'
+              archive = output / host / (name + extension)
+              original = output / host / (artifact + extension)
+              if original != archive:
+                  original.rename(archive)
+                  original.with_name(original.name + '.sha256').rename(archive.with_name(archive.name + '.sha256'))
+              components = output / host / 'component-runs.json'
+              if components.exists():
+                  components.rename(components.with_name('component-runs-' + host + '.json'))
+              checksum = archive.with_name(archive.name + '.sha256')
+              if digest(archive) != checksum.read_text().split()[0]:
+                  raise ValueError('SDK archive checksum failed: ' + host)
+              checksum.write_text(digest(archive) + '  ' + archive.name + '\n')
+              validation = output / ('physical-validation-' + host + '.json')
+              validation.write_text(json.dumps(entry['validation'], indent=2) + '\n')
+              manifest['hosts'].append({'host': host, 'archive': str(archive.relative_to(output)),
+                  'validationRecord': validation.name, 'buildRunId': run_id,
+                  'sourceRevision': entry['sourceRevision']})
+          path = output / 'sdk-set.json'; path.write_text(json.dumps(manifest, indent=2) + '\n')
+          verify_set(path, output / 'sdk-set-verification.json')
+          PY
+      - name: Publish verified archives and physical evidence
+        run: |
+          python3 -B - <<'PY'
+          import json, os, subprocess, sys
+          from pathlib import Path
+          sys.path.insert(0, 'dev/windows_arm32')
+          from release_assets import prepare_assets
+          output = Path('_work/release')
+          proof = json.loads((output / 'sdk-set-verification.json').read_text())
+          if proof.get('releaseReady') is not True or proof.get('allOfficialHostsVerified') is not True:
+              raise ValueError('Four-host SDK verification did not pass')
+          files = []
+          instructions = ''
+          for path in sorted(output.rglob('*')):
+              if not path.is_file():
+                  continue
+              if path.name.endswith(('.zip', '.tar.gz')):
+                  assets, text = prepare_assets(path)
+                  files.extend(str(asset) for asset in assets)
+                  instructions += text
+              else:
+                  files.append(str(path))
+          notes = output / 'release-notes.md'
+          notes.write_text('Flutter 3.38.10 Windows ARM32 SDK for Windows x64, Linux x64, macOS x64 and macOS arm64.\n\n'
+              'All four SDKs use one source revision and identical physically validated RT/Phone runtimes. '
+              'Each archive passed application builds after relocation and its attached physical validation.\n'
+              + instructions)
+          subprocess.run(['gh', 'release', 'create', os.environ['RELEASE_TAG'],
+              '--target', proof['sourceRevision'], '--title', os.environ['RELEASE_TAG'],
+              '--notes-file', str(notes), *files], check=True)
+          PY

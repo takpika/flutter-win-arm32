@@ -1,0 +1,17 @@
+--- a/clang/lib/Sema/SemaInit.cpp
++++ b/clang/lib/Sema/SemaInit.cpp
+@@ -5574,7 +5574,13 @@
+   //       shall be an rvalue reference.
+   //       For address spaces, we interpret this to mean that an addr space
+   //       of a reference "cv1 T1" is a superset of addr space of "cv2 T2".
+-  if (isLValueRef &&
++  // MSVC's permissive mode accepts a record temporary as a non-const
++  // reference argument. Preserve its ordinary full-expression lifetime.
++  const bool MSVCRecordTemporaryArgument =
++      S.getLangOpts().MSVCCompat && Entity.isParameterKind() &&
++      InitCategory.isPRValue() && T2->isRecordType() &&
++      RefRelationship == Sema::Ref_Compatible && !T1Quals.hasVolatile();
++  if (isLValueRef && !MSVCRecordTemporaryArgument &&
+       !(T1Quals.hasConst() && !T1Quals.hasVolatile() &&
+         T1Quals.isAddressSpaceSupersetOf(T2Quals, S.getASTContext()))) {
+     if (S.Context.getCanonicalType(T2) == S.Context.OverloadTy)

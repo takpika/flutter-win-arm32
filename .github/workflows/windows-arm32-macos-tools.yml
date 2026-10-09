@@ -1,0 +1,307 @@
+name: Windows ARM32 macOS host tools
+
+on:
+  # Dispatch when the pinned private SDK input is accessible. Amending the
+  # single port commit also touches unrelated Windows tools; that must not
+  # repeatedly start both macOS cross-build jobs.
+  workflow_dispatch:
+    inputs:
+      compiler_run_id:
+        description: Successful common Linux LLVM compiler build
+        default: '38731729920'
+      sdk_asset_id:
+        description: Private build-only macOS SDK declaration archive asset
+        default: '644120258'
+      sdk_sha256:
+        description: SHA256 of the macOS SDK declaration archive
+        default: 'ec7de0aaba47b6491b2c6d0f45de071511fe2c870b695e7092f6c43198484b1e'
+      compile:
+        description: Build and package the full host compiler after the dependency preflight
+        type: boolean
+        default: false
+      snapshot_generator:
+        description: Build the matching ARM32 AOT generator (separate run from the full compiler)
+        type: boolean
+        default: false
+      packager:
+        description: Build the full native macOS MSIX packager in a separate run
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  toolchain:
+    # GitHub requires push access to read the pinned draft-release SDK input.
+    # Keep this exception in its build job; SDK inputs are never published.
+    permissions:
+      contents: write
+      actions: read
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    timeout-minutes: ${{ (inputs.compile || inputs.snapshot_generator || inputs.packager) && 360 || 30 }}
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [macos-x64, macos-arm64]
+    env:
+      DEPOT_TOOLS_UPDATE: '0'
+      PYTHONDONTWRITEBYTECODE: '1'
+      GIT_CONFIG_COUNT: '1'
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: ${{ github.workspace }}
+      SDK_ASSET_ID: ${{ inputs.sdk_asset_id || '644120258' }}
+      SDK_SHA256: ${{ inputs.sdk_sha256 || 'ec7de0aaba47b6491b2c6d0f45de071511fe2c870b695e7092f6c43198484b1e' }}
+      COMPILE: ${{ inputs.compile }}
+      SNAPSHOT_GENERATOR: ${{ inputs.snapshot_generator }}
+      PACKAGER: ${{ inputs.packager }}
+    steps:
+      - name: Prepare Ubuntu amd64 container
+        run: |
+          test "$(uname -m)" = x86_64
+          selected=0
+          for option in "$COMPILE" "$SNAPSHOT_GENERATOR" "$PACKAGER"; do
+            if [[ "$option" == true ]]; then selected=$((selected + 1)); fi
+          done
+          if (( selected > 1 )); then
+            echo 'Run full LLVM, snapshot and packager builds separately to bound workspace disk usage.'
+            exit 1
+          fi
+          mkdir -p "$GITHUB_WORKSPACE/_work/tmp"
+          echo "TMPDIR=$GITHUB_WORKSPACE/_work/tmp" >> "$GITHUB_ENV"
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential ca-certificates git gh python3 cmake ninja-build \
+            libxml2-dev libzstd-dev zlib1g-dev curl xz-utils unzip pkg-config libglib2.0-dev libfreetype-dev
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: windows-arm32-compiler-linux-x64
+          run-id: ${{ inputs.compiler_run_id || '38731729920' }}
+          github-token: ${{ github.token }}
+          path: _work/compiler-input
+      - name: Verify source-built common LLVM and private SDK declarations
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The root checkout removes the pre-checkout scratch directory.
+          mkdir -p "$TMPDIR" _work/compiler _work/sdk
+          (cd _work/compiler-input && sha256sum --check windows-arm32-compiler-linux-x64.tar.gz.sha256)
+          tar -xzf _work/compiler-input/windows-arm32-compiler-linux-x64.tar.gz -C _work/compiler
+          gh api "repos/$GITHUB_REPOSITORY/releases/assets/$SDK_ASSET_ID" \
+            -H 'Accept: application/octet-stream' > _work/sdk-input.tar.gz
+          printf '%s  %s\n' "$SDK_SHA256" '_work/sdk-input.tar.gz' | sha256sum --check
+          tar -xzf _work/sdk-input.tar.gz -C _work/sdk
+      - name: Compile and link the destination C++ fixture
+        env:
+          TARGET_HOST: ${{ matrix.host }}
+        run: |
+          python3 -B dev/windows_arm32/toolchain/prepare_macos_host_toolchain.py \
+            --host "$TARGET_HOST" --compiler-root _work/compiler \
+            --sdk _work/sdk/sysroot --output _work/macos.cmake
+          python3 -B dev/windows_arm32/toolchain/prepare_macos_host_dependencies.py \
+            --host "$TARGET_HOST" --sdk _work/sdk/sysroot --toolchain _work/macos.cmake \
+            --output _work/dependencies --jobs 2
+          mkdir -p _work/proof-source
+          # CMake expands its framework variable when configuring the fixture.
+          # shellcheck disable=SC2016
+          printf '%s\n' 'cmake_minimum_required(VERSION 3.20)' \
+            'project(MacHostProbe LANGUAGES C CXX ASM)' \
+            'find_package(ZLIB REQUIRED)' 'find_package(LibXml2 REQUIRED)' \
+            'find_library(CORESERVICES_FRAMEWORK CoreServices REQUIRED)' \
+            'find_package(zstd CONFIG REQUIRED)' 'add_library(proof_value SHARED value.cc)' \
+            'add_executable(proof proof.cc target.S)' \
+            'set_target_properties(proof_value PROPERTIES INSTALL_NAME_DIR "@rpath" BUILD_WITH_INSTALL_NAME_DIR ON)' \
+            'set_target_properties(proof proof_value PROPERTIES BUILD_WITH_INSTALL_RPATH ON INSTALL_RPATH "@loader_path")' \
+            'target_link_libraries(proof PRIVATE proof_value ZLIB::ZLIB LibXml2::LibXml2 zstd::libzstd_static ${CORESERVICES_FRAMEWORK})' \
+            'target_compile_features(proof PRIVATE cxx_std_17)' > _work/proof-source/CMakeLists.txt
+          printf '%s\n' 'extern "C" int proof_value() { return 42; }' > _work/proof-source/value.cc
+          printf '%s\n' '#ifndef __APPLE__' '#error Assembly must target macOS' '#endif' \
+            '.text' > _work/proof-source/target.S
+          printf '%s\n' '#include <cstdio>' '#include <string>' '#include <zlib.h>' \
+            '#include <zstd.h>' '#include <libxml/parser.h>' '#include <CoreServices/CoreServices.h>' \
+            'extern "C" int proof_value();' \
+            'int main() { if(proof_value()!=42) return 3; const std::string message="macOS 日本語";' \
+            'std::puts(message.c_str()); std::puts(zlibVersion()); std::puts(ZSTD_versionString());' \
+            'xmlDocPtr doc=xmlReadMemory("<root/>",7,"probe.xml",nullptr,0);' \
+            'if(!doc) return 2; xmlFreeDoc(doc);' \
+            'return FSEventsGetCurrentEventId() == static_cast<FSEventStreamEventId>(-1); }' \
+            > _work/proof-source/proof.cc
+          cmake -G Ninja -S _work/proof-source -B _work/proof \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/_work/dependencies/macos.cmake" \
+            -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/_work/dependencies/prefix"
+          cmake --build _work/proof
+          python3 -B - <<'PY'
+          import hashlib, json, os, sys
+          from pathlib import Path
+          sys.path.insert(0, 'dev/windows_arm32')
+          from sdk_hosts import select_host, verify_native_host
+          sys.path.insert(0, 'dev/windows_arm32/toolchain')
+          from macho_native_dependencies import audit
+          from package_macos_host_compiler import inspect
+          binary = Path('_work/proof/proof')
+          host = select_host(os.environ['TARGET_HOST'])
+          verify_native_host(binary, host)
+          library = binary.with_name('libproof_value.dylib')
+          objdump = Path('_work/compiler/bin/llvm-objdump')
+          private = {library.name}
+          imports = audit(binary, private, host, objdump)
+          relocation = {path.name: inspect(path, host, objdump, private) for path in (binary, library)}
+          report = {'host': os.environ['TARGET_HOST'], 'linuxAmd64CrossCompileAndLinkPassed': True,
+                    'compilerDependenciesLinked': ['zlib', 'zstd-static', 'libxml2', 'CoreServices'],
+                    'nativeDependencies': imports, 'systemLibrariesCopied': False,
+                    'privateDylibRelocation': relocation,
+                    'binarySha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
+                    'destinationRuntimeExecutionVerified': False, 'fullHostCompilerBuilt': False}
+          Path('_work/proof/verification.json').write_text(json.dumps(report, indent=2) + '\n')
+          PY
+      - name: Install the CMake version required by upstream MSIX
+        if: inputs.packager
+        run: |
+          curl --fail --location --retry 3 \
+            https://github.com/Kitware/CMake/releases/download/v3.31.9/cmake-3.31.9-linux-x86_64.tar.gz \
+            --output _work/cmake.tar.gz
+          echo '312d78e0b7c5c9b4a97a87a46c3e525aa84895fe8135c238c4616bba73dc9518  _work/cmake.tar.gz' | sha256sum --check
+          mkdir -p _work/cmake
+          tar -xzf _work/cmake.tar.gz --strip-components=1 -C _work/cmake
+          echo "$GITHUB_WORKSPACE/_work/cmake/bin" >> "$GITHUB_PATH"
+      - name: Build and audit the full native macOS MSIX packager
+        if: inputs.packager
+        env:
+          TARGET_HOST: ${{ matrix.host }}
+        run: |
+          python3 -B dev/windows_arm32/toolchain/prepare_msix.py \
+            --output _work/msix --jobs 2 --host "$TARGET_HOST" \
+            --toolchain _work/macos.cmake --llvm-objdump _work/compiler/bin/llvm-objdump
+          tar -czf "_work/windows-arm32-msix-$TARGET_HOST.tar.gz" -C _work/msix/distribution .
+          (cd _work && sha256sum "windows-arm32-msix-$TARGET_HOST.tar.gz" \
+            > "windows-arm32-msix-$TARGET_HOST.tar.gz.sha256")
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: inputs.packager
+        with:
+          name: windows-arm32-msix-${{ matrix.host }}
+          path: |
+            _work/windows-arm32-msix-${{ matrix.host }}.tar.gz
+            _work/windows-arm32-msix-${{ matrix.host }}.tar.gz.sha256
+            _work/msix/distribution/msix-provenance.json
+          if-no-files-found: error
+      - name: Sync pinned engine sources for the matching AOT generator
+        if: inputs.snapshot_generator
+        run: |
+          git clone --filter=blob:none --no-checkout \
+            https://chromium.googlesource.com/chromium/tools/depot_tools.git _work/depot_tools
+          git -C _work/depot_tools checkout --detach b41883b1dc5a92bc7a53d69e27cfbfd320fd52ca
+          export PATH="$GITHUB_WORKSPACE/_work/depot_tools:$PATH"
+          python3 -B dev/windows_arm32/prepare_engine_checkout.py --windows-inputs
+          python3 -B - <<'PY'
+          import json, subprocess
+          from pathlib import Path
+          compiler = Path('_work/compiler').resolve()
+          clang = compiler / 'bin/clang'
+          values = {'compiler': str(clang), 'llvmBin': str(compiler / 'bin'),
+                    'resourceDir': subprocess.check_output([str(clang), '-print-resource-dir'], text=True).strip()}
+          Path('_work/snapshot-toolchain.json').write_text(json.dumps(values, indent=2) + '\n')
+          PY
+      - name: Build the native macOS generator for the common ARM32 Windows VM
+        if: inputs.snapshot_generator
+        env:
+          TARGET_HOST: ${{ matrix.host }}
+        run: |
+          python3 -B dev/windows_arm32/build_macos_snapshot.py --host "$TARGET_HOST" \
+            --toolchain-config _work/snapshot-toolchain.json --sdk _work/sdk/sysroot \
+            --output _work/macos-snapshot --jobs 2
+          tar -czf "_work/windows-arm32-snapshot-$TARGET_HOST.tar.gz" \
+            -C _work/macos-snapshot gen_snapshot snapshot-provenance.json
+          (cd _work && sha256sum "windows-arm32-snapshot-$TARGET_HOST.tar.gz" \
+            > "windows-arm32-snapshot-$TARGET_HOST.tar.gz.sha256")
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: inputs.snapshot_generator
+        with:
+          name: windows-arm32-snapshot-${{ matrix.host }}
+          path: |
+            _work/windows-arm32-snapshot-${{ matrix.host }}.tar.gz
+            _work/windows-arm32-snapshot-${{ matrix.host }}.tar.gz.sha256
+            _work/macos-snapshot/snapshot-provenance.json
+          if-no-files-found: error
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: inputs.compile
+        with:
+          repository: llvm/llvm-project
+          ref: e77ac8049afab1ed6dcd048a65c0e5c030293c84
+          path: _work/llvm-project
+          persist-credentials: false
+          sparse-checkout: |
+            clang
+            cmake
+            lld
+            libunwind
+            llvm
+            third-party
+      - name: Build native generators from the same patched LLVM source
+        if: inputs.compile
+        run: |
+          python3 -B - <<'PY'
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, 'dev/windows_arm32/toolchain')
+          from build_compiler import prepare
+          prepare(Path('_work/llvm-project').resolve())
+          PY
+          cmake -G Ninja -S _work/llvm-project/llvm -B _work/native-generators \
+            -DCMAKE_C_COMPILER="$GITHUB_WORKSPACE/_work/compiler/bin/clang" \
+            -DCMAKE_CXX_COMPILER="$GITHUB_WORKSPACE/_work/compiler/bin/clang++" \
+            -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_PROJECTS=clang \
+            -DLLVM_ENABLE_ASSERTIONS=ON -DLLVM_TARGETS_TO_BUILD=all
+          cmake --build _work/native-generators --parallel 2 \
+            --target llvm-tblgen clang-tblgen llvm-min-tblgen
+          printf 'set(LLVM_NATIVE_TOOL_DIR [=[%s]=] CACHE PATH "")\n' \
+            "$GITHUB_WORKSPACE/_work/native-generators/bin" >> _work/dependencies/macos.cmake
+      - name: Build and package the complete macOS host compiler
+        if: inputs.compile
+        env:
+          TARGET_HOST: ${{ matrix.host }}
+        run: |
+          python3 -B dev/windows_arm32/toolchain/build_host_compiler.py \
+            --host "$TARGET_HOST" --source _work/llvm-project --output _work/host-compiler \
+            --toolchain _work/dependencies/macos.cmake \
+            --dependency-prefix _work/dependencies/prefix --jobs 2
+          python3 -B dev/windows_arm32/toolchain/package_macos_host_compiler.py \
+            --host "$TARGET_HOST" --source _work/host-compiler \
+            --dependencies _work/dependencies/prefix \
+            --llvm-objdump _work/compiler/bin/llvm-objdump \
+            --output "_work/windows-arm32-compiler-$TARGET_HOST"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: inputs.compile
+        with:
+          name: windows-arm32-compiler-${{ matrix.host }}
+          path: |
+            _work/windows-arm32-compiler-${{ matrix.host }}.tar.gz
+            _work/windows-arm32-compiler-${{ matrix.host }}.tar.gz.sha256
+            _work/windows-arm32-compiler-${{ matrix.host }}/distribution-manifest.json
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: windows-arm32-macos-toolchain-${{ matrix.host }}
+          path: |
+            _work/proof/proof
+            _work/proof/libproof_value.dylib
+            _work/proof/verification.json
+            _work/proof/CMakeFiles/CMakeConfigureLog.yaml
+            _work/macos.cmake
+            _work/dependencies/prefix/host-dependency-provenance.json
+            _work/host-compiler/CMakeCache.txt
+            _work/host-compiler/CMakeFiles/CMakeConfigureLog.yaml
+            _work/macos-snapshot/toolchain.json
+            _work/macos-snapshot/build/args.gn
+            _work/macos-snapshot/build/.ninja_log
+            _work/macos-snapshot/build/gen_snapshot.rsp
+          if-no-files-found: warn

@@ -746,6 +746,9 @@ import 'package:{{pluginName}}/{{dartFileName}}' as {{pluginName}};
 {{#windows}}
 import 'package:{{pluginName}}/{{dartFileName}}' as {{pluginName}};
 {{/windows}}
+{{#phoneFirebaseMessaging}}
+import {{{libraryLiteral}}} as windowsPhoneFirebaseMessaging;
+{{/phoneFirebaseMessaging}}
 
 @pragma('vm:entry-point')
 class _PluginRegistrant {
@@ -772,6 +775,11 @@ $_dartPluginRegisterWith
       {{#windows}}
 $_dartPluginRegisterWith
       {{/windows}}
+      {{#phoneFirebaseMessaging}}
+      windowsPhoneFirebaseMessaging.WindowsPhoneFirebaseMessaging.registerWith(
+        dispatcherLibraryUri: {{{libraryLiteral}}},
+      );
+      {{/phoneFirebaseMessaging}}
     }
   }
 }
@@ -1728,6 +1736,17 @@ bool _hasPluginInlineDartImpl(Plugin plugin, String platformKey) {
   return (null, null);
 }
 
+/// Library identifier shared by the Phone registrant and its background host.
+Uri windowsPhoneFirebaseMessagingLibraryUri(FileSystem fs, String flutterRoot) => fs
+    .directory(flutterRoot)
+    .childDirectory('dev')
+    .childDirectory('windows_arm32')
+    .childDirectory('plugins')
+    .childDirectory('firebase_messaging')
+    .childFile('firebase_messaging.dart')
+    .absolute
+    .uri;
+
 /// Generates the Dart plugin registrant, which allows to bind a platform
 /// implementation of a Dart only plugin to its interface.
 /// The new entrypoint wraps [currentMainUri], adds the `_PluginRegistrant` class,
@@ -1743,8 +1762,9 @@ Future<void> generateMainDartWithPluginRegistrant(
   FlutterProject rootProject,
   PackageConfig packageConfig,
   String currentMainUri,
-  File mainFile,
-) async {
+  File mainFile, {
+  bool windowsPhone = false,
+}) async {
   final List<Plugin> plugins = await findPlugins(rootProject);
   final List<PluginInterfaceResolution> resolutions = resolvePlatformImplementation(
     plugins,
@@ -1758,14 +1778,29 @@ Future<void> generateMainDartWithPluginRegistrant(
   final templateContext = <String, Object>{
     'mainEntrypoint': currentMainUri,
     'dartLanguageVersion': entrypointVersion.toString(),
+    'phoneFirebaseMessaging': false,
     AndroidPlugin.kConfigKey: <Object?>[],
     IOSPlugin.kConfigKey: <Object?>[],
     LinuxPlugin.kConfigKey: <Object?>[],
     MacOSPlugin.kConfigKey: <Object?>[],
     WindowsPlugin.kConfigKey: <Object?>[],
   };
+  // FlutterFire has no published Windows messaging implementation. Supply the
+  // Phone implementation from this SDK without rewriting app or pub sources.
+  final bool phoneFirebaseMessaging =
+      windowsPhone && packageConfig.packages.any((Package p) => p.name == 'firebase_messaging');
+  if (phoneFirebaseMessaging) {
+    final libraryUri = windowsPhoneFirebaseMessagingLibraryUri(
+      globals.fs,
+      Cache.flutterRoot!,
+    ).toString();
+    templateContext['phoneFirebaseMessaging'] = <String, Object>{
+      // JSON quoting is also valid Dart after escaping interpolation markers.
+      'libraryLiteral': jsonEncode(libraryUri).replaceAll(r'$', r'\$'),
+    };
+  }
   final File newMainDart = rootProject.dartPluginRegistrant;
-  if (resolutions.isEmpty) {
+  if (resolutions.isEmpty && !phoneFirebaseMessaging) {
     try {
       if (await newMainDart.exists()) {
         await newMainDart.delete();

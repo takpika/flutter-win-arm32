@@ -1,0 +1,15 @@
+{
+  "upstreamRevision": "3ff870f957d511627690f4d3601987ce40d0d97c",
+  "files": [
+    {
+      "path": "absl/base/internal/low_level_alloc.cc",
+      "originalSha256": "15335878e3a42c52bef27e86becc3def962b0de7365d7b9a153f5b8e0601c76d",
+      "patchedSha256": "51d0b3ac6c69de0722ca7ed4dfef25cfcb9c3829c9107b237052874d4e2f4715"
+    },
+    {
+      "path": "absl/base/internal/thread_identity.h",
+      "originalSha256": "9be2eafd7aa904a9f4c656a7cc3641f870192a9be8f64bfbb0370693e373442a",
+      "patchedSha256": "7bf0f4270c77333081b38ea709dd4f8e555833c4c299997b4bbcb80f00f8fa5f"
+    }
+  ]
+}

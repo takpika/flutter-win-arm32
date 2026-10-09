@@ -1,0 +1,60 @@
+{
+  "format": 1,
+  "development": true,
+  "integrationRelease": false,
+  "architecture": "arm",
+  "dll": "wpnotify.dll",
+  "inProcessBackgroundMinimumOs": "10.0.14393.0",
+  "appServiceExtension": "AppServiceExtension.xml",
+  "headers": "include",
+  "importLibrary": "lib/arm/wpnotify.lib",
+  "framework": {
+    "name": "MacMobile.WpnRuntime.1",
+    "publisher": "CN=MacMobileDev",
+    "minVersion": "1.0.0.53",
+    "sha256": "6eee5ece7c9a94cae0fa932795429c2e193bc84345c550fe1cebf2f56a984fcd"
+  },
+  "hub": {
+    "name": "MacMobile.WpnHub",
+    "minVersion": "1.0.1.51",
+    "sha256": "2527f2e9cf6ce4773743906258043af7180f6e8d169503931ef3e2a87f9ea677"
+  },
+  "abi": {
+    "provided": 22,
+    "minimumCompatible": 15,
+    "requirement": "runtime ABI >= consumer required ABI; resolve every required optional export before use; this artifact advertises only exports in its header",
+    "extensionRule": "Existing ABI15 function signatures and structure layouts remain unchanged. New capabilities use new exports/new structures, never resize existing ABI15 structs."
+  },
+  "capabilities": {
+    "tokenRefreshSubscription": {
+      "available": true,
+      "requiredAbi": 16
+    },
+    "autoInitFacade": true,
+    "autoInitRequiredAbi": 17,
+    "metricsFacade": true,
+    "metricsRequiredAbi": 18,
+    "coreDefaultGetter": true,
+    "coreDefaultGetterRequiredAbi": 19,
+    "coreDefaultImport": true,
+    "coreDefaultImportRequiredAbi": 20,
+    "coreApplicationIdentity": true,
+    "coreApplicationIdentityRequiredAbi": 21,
+    "asyncDrain": true,
+    "asyncDrainRequiredAbi": 22
+  },
+  "dependenciesInstalledSeparately": true,
+  "embedDll": false,
+  "notificationSettings": {
+    "windowsOwnsPermission": true,
+    "promptSupported": false,
+    "supportedMask": 1,
+    "unknownRequestedBits": "Returned unchanged in unsupported_requested_fields",
+    "provisional": {
+      "requestedMask": 8192,
+      "supported": false,
+      "interpretation": "Do not project as denied or authorized provisional. Flutter maps to unsupported/platform-specific status."
+    }
+  },
+  "sourceBuildReportSha256": "25321676f8fe15cafd9d98523003c1abf07febf6b17b1ff33c679d43eb7c8d27"
+}

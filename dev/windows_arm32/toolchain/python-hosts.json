@@ -1,0 +1,38 @@
+{
+  "linux-x64": {
+    "pythonVersion": "3.14.6",
+    "pythonHost": "x86_64-unknown-linux-gnu",
+    "archiveUrl": "https://github.com/astral-sh/python-build-standalone/releases/download/20260623/cpython-3.14.6%2B20260623-x86_64-unknown-linux-gnu-pgo%2Blto-full.tar.zst",
+    "archiveSha256": "59a0e2d202f1d36cd8233cf1c426b469048025cf4eb26b972aea334c302cd999",
+    "wheelUrl": "https://files.pythonhosted.org/packages/5c/44/c85361f65dbe00eea8576ee467c768d25129989efb76e94f205e9ca9bb46/pillow-12.3.0-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+    "wheelSha256": "251bf95b67017e27b13d82f5b326234ca62d70f9cf4c2b9032de2358a3b12c7b",
+    "wheelPlatform": "manylinux_2_28_x86_64"
+  },
+  "macos-x64": {
+    "pythonVersion": "3.14.6",
+    "pythonHost": "x86_64-apple-darwin",
+    "archiveUrl": "https://github.com/astral-sh/python-build-standalone/releases/download/20260623/cpython-3.14.6%2B20260623-x86_64-apple-darwin-pgo%2Blto-full.tar.zst",
+    "archiveSha256": "8776df867b4710ff3e688c4b123677a4ac53eea3432e74e91c7b26efe5f72c77",
+    "wheelUrl": "https://files.pythonhosted.org/packages/85/e2/73c77d218410b14f5f2d565e8a998d5317b7b9c75368d29985139f7a46f0/pillow-12.3.0-cp314-cp314-macosx_10_15_x86_64.whl",
+    "wheelSha256": "ba54cfebe86920a559a7c4d6b9050791c20513650a1952ebe3368c7dc70306f8",
+    "wheelPlatform": "macosx_10_15_x86_64"
+  },
+  "macos-arm64": {
+    "pythonVersion": "3.14.6",
+    "pythonHost": "aarch64-apple-darwin",
+    "archiveUrl": "https://github.com/astral-sh/python-build-standalone/releases/download/20260623/cpython-3.14.6%2B20260623-aarch64-apple-darwin-pgo%2Blto-full.tar.zst",
+    "archiveSha256": "58ba7c2f7a5bad3031065abaad75f701a3e8b7f83679917c396a850876a48205",
+    "wheelUrl": "https://files.pythonhosted.org/packages/c7/da/32c752228ae345f489e3a42499d817b6c3996da7e8a3bc7a04fc806b243b/pillow-12.3.0-cp314-cp314-macosx_11_0_arm64.whl",
+    "wheelSha256": "e158cb00350dc278f3b91551101aa7d12415a66ebf2c91d8d5ac14e56ddd3ad0",
+    "wheelPlatform": "macosx_11_0_arm64"
+  },
+  "windows-x64": {
+    "pythonVersion": "3.14.6",
+    "pythonHost": "x86_64-pc-windows-msvc",
+    "archiveUrl": "https://github.com/astral-sh/python-build-standalone/releases/download/20260623/cpython-3.14.6%2B20260623-x86_64-pc-windows-msvc-pgo-full.tar.zst",
+    "archiveSha256": "81e1d5e072ec677d05287f09ce7bfcef35e998c2511ee37ae470c477bace967a",
+    "wheelUrl": "https://files.pythonhosted.org/packages/f1/e0/492879f69d94f91f60fc8cd05ba03650e9520afebb2fb7aa12777d7c7f38/pillow-12.3.0-cp314-cp314-win_amd64.whl",
+    "wheelSha256": "fdafc9cce40277e0f7a0feabce0ee50dd2fa1800f3b38015e51296b5e814048d",
+    "wheelPlatform": "win_amd64"
+  }
+}

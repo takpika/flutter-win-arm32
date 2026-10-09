@@ -1,0 +1,207 @@
+name: Windows ARM32 macOS SDK dependencies
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [sdk-host-tools-validation]
+    paths:
+      - .github/workflows/windows-arm32-macos-sdk-dependencies.yml
+      - dev/windows_arm32/assemble_sdk.py
+      - dev/windows_arm32/configure_sdk_dependencies.py
+      - dev/windows_arm32/toolchain/*rust*.py
+      - dev/windows_arm32/tests/test_*cross*.py
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    steps:
+      - name: Prepare Ubuntu amd64
+        run: |
+          test "$(uname -m)" = x86_64
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates git python3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Verify foreign-host preparation boundaries
+        run: |
+          mkdir -p _work/tmp
+          export TMPDIR="$GITHUB_WORKSPACE/_work/tmp"
+          python3 -B -m unittest discover -s dev/windows_arm32/tests -p 'test_*cross*.py'
+  rust:
+    needs: contracts
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [macos-x64, macos-arm64]
+        version: ['1.95.0', '1.93.1']
+    env:
+      CARGO_HOME: ${{ github.workspace }}/_work/cargo
+      RUSTUP_HOME: ${{ github.workspace }}/_work/rustup
+      TMPDIR: ${{ github.workspace }}/_work/tmp
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Prepare Ubuntu amd64
+        run: |
+          test "$(uname -m)" = x86_64
+          mkdir -p "$TMPDIR"
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl git llvm python3 xz-utils
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install source-matched reference and destination components
+        env:
+          SDK_HOST: ${{ matrix.host }}
+          RUST_VERSION: ${{ matrix.version }}
+        run: |
+          mkdir -p "$TMPDIR"
+          curl --fail --location --retry 3 \
+            https://static.rust-lang.org/rustup/archive/1.28.2/x86_64-unknown-linux-gnu/rustup-init \
+            --output _work/rustup-init
+          echo '20a06e644b0d9bd2fbdbfd52d42540bdde820ea7df86e92e533c073da0cdd43c  _work/rustup-init' | sha256sum --check
+          chmod +x _work/rustup-init
+          _work/rustup-init -y --no-modify-path --default-toolchain none
+          python3 -B - <<'PY'
+          import hashlib, json, os, subprocess, sys
+          from pathlib import Path
+          sys.path.insert(0, 'dev/windows_arm32')
+          from sdk_hosts import select_host
+          host = select_host(os.environ['SDK_HOST'])
+          rustup = Path(os.environ['CARGO_HOME']) / 'bin/rustup'
+          for triple in ('x86_64-unknown-linux-gnu', host['rustHost']):
+              subprocess.run([str(rustup), 'toolchain', 'install', os.environ['RUST_VERSION'] + '-' + triple,
+                              '--force-non-host', '--no-self-update', '--profile', 'minimal',
+                              '--component', 'rust-src'], check=True)
+          pinned = json.loads(Path('dev/windows_arm32/toolchain/rustup-hosts.json').read_text())[host['id']]
+          destination = Path('_work/rustup-macos')
+          subprocess.run(['curl', '--fail', '--location', '--retry', '3', pinned['url'],
+                          '--output', str(destination)], check=True)
+          if hashlib.sha256(destination.read_bytes()).hexdigest() != pinned['sha256']:
+              raise ValueError('Unexpected destination Rustup executable')
+          destination.chmod(0o755)
+          PY
+      - name: Audit complete destination payload without executing Mach-O binaries
+        env:
+          SDK_HOST: ${{ matrix.host }}
+          RUST_VERSION: ${{ matrix.version }}
+        run: |
+          python3 -B - <<'PY'
+          import json, os, sys, tarfile
+          from pathlib import Path
+          sys.path[:0] = ['dev/windows_arm32', 'dev/windows_arm32/toolchain']
+          from sdk_hosts import select_host
+          from prepare_rust_distribution import prepare
+          host = select_host(os.environ['SDK_HOST'])
+          version = os.environ['RUST_VERSION']
+          work = Path('_work').resolve()
+          toolchains = Path(os.environ['RUSTUP_HOME']) / 'toolchains'
+          rustc = toolchains / (version + '-' + host['rustHost']) / 'bin/rustc'
+          reference = toolchains / (version + '-x86_64-unknown-linux-gnu') / 'bin/rustc'
+          payload = work / 'distribution'
+          options = dict(host=host['id'], reference_rustc=reference,
+                         llvm_objdump=Path('/usr/bin/llvm-objdump'), rustup=work / 'rustup-macos')
+          prepare(rustc, payload, version, **options)
+          relocated = work / 'relocated Rust 日本語'
+          payload.rename(relocated)
+          prepare(rustc, relocated, version, verify_existing=True, **options)
+          evidence = json.loads((relocated / 'rust-distribution-provenance.json').read_text())
+          if evidence['compilerExecutionVerified'] or not evidence['crossPreparation']:
+              raise ValueError('Cross preparation must not claim destination execution')
+          archive = work / ('windows-arm32-rust-' + version + '-' + host['id'] + '.tar.gz')
+          with tarfile.open(archive, 'w:gz') as output:
+              output.add(relocated, arcname='.')
+          import hashlib
+          with archive.open('rb') as stream:
+              checksum = hashlib.file_digest(stream, 'sha256').hexdigest()
+          archive.with_name(archive.name + '.sha256').write_text(checksum + '  ' + archive.name + '\n')
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-arm32-rust-${{ matrix.version }}-${{ matrix.host }}
+          path: |
+            _work/windows-arm32-rust-*.tar.gz
+            _work/windows-arm32-rust-*.tar.gz.sha256
+            _work/relocated Rust 日本語/rust-distribution-provenance.json
+          if-no-files-found: error
+  python:
+    needs: contracts
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [macos-x64, macos-arm64]
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Prepare Ubuntu amd64
+        run: |
+          test "$(uname -m)" = x86_64
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl git llvm python3 python3-pip zstd
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Prepare and verify pinned foreign Python and Pillow
+        env:
+          SDK_HOST: ${{ matrix.host }}
+        run: |
+          mkdir -p _work/tmp
+          export TMPDIR="$GITHUB_WORKSPACE/_work/tmp"
+          export TMP="$TMPDIR" TEMP="$TMPDIR"
+          python3 -B - <<'PY'
+          import hashlib, json, os, subprocess, sys, tarfile
+          from pathlib import Path
+          from urllib.parse import unquote, urlparse
+          sys.path[:0] = ['dev/windows_arm32', 'dev/windows_arm32/toolchain']
+          from prepare_python import prepare, inputs
+          from sdk_hosts import select_host
+          from assemble_sdk import verify_cross_python
+          host = select_host(os.environ['SDK_HOST'])
+          pinned = inputs(host)
+          work = Path('_work').resolve()
+          archive = work / 'python-source.tar.zst'
+          wheel = work / unquote(Path(urlparse(pinned['wheelUrl']).path).name)
+          for url, destination in ((pinned['archiveUrl'], archive), (pinned['wheelUrl'], wheel)):
+              subprocess.run(['curl', '--fail', '--location', '--retry', '3',
+                              url, '--output', str(destination)], check=True)
+          payload = prepare(archive, wheel, work / 'python', host=host['id'],
+                            installer_python=Path(sys.executable),
+                            llvm_objdump=Path('/usr/bin/llvm-objdump'))
+          required = Path('dev/windows_arm32/requirements-phone-packaging.txt').read_text().strip().split('==')[1]
+          verify_cross_python(payload, host, required)
+          relocated = work / 'relocated Python 日本語'
+          payload.rename(relocated)
+          verify_cross_python(relocated, host, required)
+          output = work / ('python-' + host['id'] + '.tar.gz')
+          with tarfile.open(output, 'w:gz') as package:
+              package.add(relocated, arcname='.')
+          with output.open('rb') as stream:
+              checksum = hashlib.file_digest(stream, 'sha256').hexdigest()
+          output.with_name(output.name + '.sha256').write_text(checksum + '  ' + output.name + '\n')
+          proof = {'host': host['id'], 'pinnedFilesAndMetadataAfterRelocationVerified': True,
+                   'destinationPythonExecuted': False, 'fullSdkAssemblyVerified': False}
+          (work / 'python-cross-verification.json').write_text(json.dumps(proof, indent=2) + '\n')
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-arm32-python-${{ matrix.host }}
+          path: |
+            _work/python-${{ matrix.host }}.tar.gz
+            _work/python-${{ matrix.host }}.tar.gz.sha256
+            _work/relocated Python 日本語/python-provenance.json
+            _work/python-cross-verification.json
+          if-no-files-found: error

@@ -1,0 +1,31 @@
+--- a/lld/COFF/DLL.cpp
++++ b/lld/COFF/DLL.cpp
+@@ -659,7 +659,7 @@
+       if (symtab.machine == ARMNT && !e.data)
+         bit = 1;
+       if (e.forwardChunk) {
+-        write32le(p, e.forwardChunk->getRVA() | bit);
++        write32le(p, e.forwardChunk->getRVA());
+       } else {
+         assert(cast<Defined>(e.sym)->getRVA() != 0 &&
+                "Exported symbol unmapped");
+--- a/lld/test/COFF/export-armnt.yaml
++++ b/lld/test/COFF/export-armnt.yaml
+@@ -12,6 +12,17 @@
+ # CHECK-NEXT:       2   0x1005  exportfn1
+ # CHECK-NEXT:       3   0x1009  exportfn2
+ # CHECK-NEXT:       4   0x1009  exportfn3
++
++# A forwarder RVA points to a string, not Thumb code. Test target strings
++# of different lengths so that both even and odd addresses are exercised.
++# RUN: lld-link /out:%t.fwd.dll /dll %t.obj /export:exportfn1 /export:exportdata,data /export:forward1=one.FuncA /export:forward2=two.FuncBB /export:forward3=three.FuncCCC
++# RUN: llvm-readobj --coff-exports %t.fwd.dll | FileCheck %s --check-prefix=FORWARD
++# FORWARD: Name: forward1
++# FORWARD-NEXT: ForwardedTo: one.FuncA
++# FORWARD: Name: forward2
++# FORWARD-NEXT: ForwardedTo: two.FuncBB
++# FORWARD: Name: forward3
++# FORWARD-NEXT: ForwardedTo: three.FuncCCC
+ 
+ --- !COFF
+ header:

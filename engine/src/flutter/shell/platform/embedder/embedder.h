@@ -1065,6 +1065,12 @@ typedef struct {
   FlutterEngineDisplayId display_id;
   /// The view that this event is describing.
   int64_t view_id;
+  /// Phone embedder extension: physical safe-area margins supplied by the OS.
+  /// Appended for struct_size compatibility; older embedders default to zero.
+  double physical_view_padding_top;
+  double physical_view_padding_right;
+  double physical_view_padding_bottom;
+  double physical_view_padding_left;
 } FlutterWindowMetricsEvent;
 
 typedef struct {
@@ -2756,6 +2762,20 @@ typedef struct {
   /// `PlatformDispatcher.instance.engineId`. Can be used in native code to
   /// retrieve the engine instance that is running the Dart code.
   int64_t engine_id;
+
+  /// Optional library URI containing `custom_dart_entrypoint`. A null or empty
+  /// value preserves entrypoint lookup in the application's root library. If
+  /// this is non-empty and `custom_dart_entrypoint` is null or empty, "main" is
+  /// used. The library and entrypoint must be retained in the application AOT
+  /// snapshot, for example with `@pragma('vm:entry-point')`.
+  const char* custom_dart_entrypoint_library;
+
+  /// Optional application-private directory for PluginUtilities callback
+  /// persistence. The host creates this directory and uses the same path for
+  /// all engines in the process. A null or empty value leaves persistence
+  /// configuration unchanged. Set before registering callbacks or starting
+  /// background engines; callback data is restored before Dart starts.
+  const char* dart_callback_cache_path;
 } FlutterProjectArgs;
 
 typedef struct {

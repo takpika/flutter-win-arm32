@@ -95,8 +95,8 @@ config("compiler") {
     cflags += [
       "/GS",  # Enable buffer security checking.
       "/FS",  # Preserve previous PDB behavior.
-      "/guard:cf",  # Enable control flow guard security checks.
     ]
+    cflags += [ "/guard:cf" ]  # Enable control flow guard security checks.
   } else {
     cflags_c += [ "-std=c11" ]
 
@@ -276,6 +276,8 @@ config("compiler") {
         cflags += [ "-m32" ]
       } else if (current_cpu == "x64") {
         cflags += [ "-m64" ]
+      } else if (current_cpu == "arm") {
+        cflags += [ "--target=armv7-windows-msvc" ]
       } else if (current_cpu == "arm64") {
         cflags += [ "--target=arm64-windows" ]
       } else {

@@ -1,0 +1,35 @@
+diff --git a/crypto/internal.h b/crypto/internal.h
+index dc504b4..ecc10f6 100644
+--- a/crypto/internal.h
++++ b/crypto/internal.h
+@@ -34,7 +34,7 @@
+ #endif
+ 
+ #if defined(OPENSSL_THREADS) && \
+-    (!defined(OPENSSL_WINDOWS) || defined(__MINGW32__))
++    (!defined(OPENSSL_WINDOWS) || (defined(__MINGW32__) && !defined(FLUTTER_WINDOWS_PHONE)))
+ #include <pthread.h>
+ #define OPENSSL_PTHREADS
+ #endif
+diff --git a/crypto/thread_win.cc b/crypto/thread_win.cc
+index 4e22c47..97acc87 100644
+--- a/crypto/thread_win.cc
++++ b/crypto/thread_win.cc
+@@ -119,7 +119,7 @@ static void NTAPI thread_local_destructor(PVOID module, DWORD reason,
+ // Note, in the prefixed build, |p_thread_callback_boringssl| may be a macro.
+ #define STRINGIFY(x) #x
+ #define EXPAND_AND_STRINGIFY(x) STRINGIFY(x)
+-#ifdef _WIN64
++#if defined(_WIN64) || defined(FLUTTER_WINDOWS_PHONE)
+ __pragma(comment(linker, "/INCLUDE:_tls_used")) __pragma(comment(
+     linker, "/INCLUDE:" EXPAND_AND_STRINGIFY(p_thread_callback_boringssl)))
+ #else
+@@ -143,7 +143,7 @@ __pragma(comment(linker, "/INCLUDE:__tls_used")) __pragma(comment(
+ // reference to this variable with a linker /INCLUDE:symbol pragma to ensure
+ // that.) If this variable is discarded, the OnThreadExit function will never
+ // be called.
+-#ifdef _WIN64
++#if defined(_WIN64) || defined(FLUTTER_WINDOWS_PHONE)
+ 
+ // .CRT section is merged with .rdata on x64 so it must be constant data.
+ #pragma const_seg(".CRT$XLC")

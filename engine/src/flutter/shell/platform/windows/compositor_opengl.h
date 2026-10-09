@@ -6,6 +6,7 @@
 #define FLUTTER_SHELL_PLATFORM_WINDOWS_COMPOSITOR_OPENGL_H_
 
 #include <memory>
+#include <vector>
 
 #include "flutter/fml/macros.h"
 #include "flutter/impeller/renderer/backend/gles/proc_table_gles.h"
@@ -62,6 +63,11 @@ class CompositorOpenGL : public Compositor {
 
   // Whether the Impeller rendering backend is enabled.
   bool enable_impeller_ = false;
+
+  // Reused readback storage for the Windows ARM pbuffer-to-GDI bridge. The
+  // compositor runs on the raster thread, so this buffer is not shared across
+  // threads.
+  std::vector<uint8_t> readback_buffer_;
 
   // Initialize the compositor. This must run on the raster thread.
   bool Initialize();

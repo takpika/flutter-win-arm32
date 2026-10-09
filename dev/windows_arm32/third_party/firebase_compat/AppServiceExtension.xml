@@ -1,0 +1,1 @@
+<uap:Extension xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10" Category="windows.appService"><uap:AppService Name="wpnotify.deliver" /></uap:Extension>

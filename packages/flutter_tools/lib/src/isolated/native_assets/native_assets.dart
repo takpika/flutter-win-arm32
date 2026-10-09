@@ -668,6 +668,7 @@ OS getNativeOSFromTargetPlatform(TargetPlatform platform) {
     case TargetPlatform.linux_arm64:
       return OS.linux;
     case TargetPlatform.windows_x64:
+    case TargetPlatform.windows_arm:
     case TargetPlatform.windows_arm64:
       return OS.windows;
     case TargetPlatform.fuchsia_arm64:

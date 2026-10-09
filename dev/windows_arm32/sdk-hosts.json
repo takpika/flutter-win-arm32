@@ -1,0 +1,43 @@
+{
+  "flutterVersion": "3.38.10",
+  "frameworkRevision": "c6f67dede3d4aa1aa7a69dd56a3494a5cde6cc80",
+  "dartVersion": "3.10.9",
+  "hosts": [
+    {
+      "id": "linux-x64",
+      "os": "linux",
+      "cpu": "x64",
+      "rustHost": "x86_64-unknown-linux-gnu",
+      "officialIndex": "https://storage.googleapis.com/flutter_infra_release/releases/releases_linux.json",
+      "officialArchive": "stable/linux/flutter_linux_3.38.10-stable.tar.xz",
+      "officialSha256": "385e2629a0a585a835f351ca1605d2c7996377ce2fa16e68296e8fc9a78ccf7a"
+    },
+    {
+      "id": "macos-x64",
+      "os": "macos",
+      "cpu": "x64",
+      "rustHost": "x86_64-apple-darwin",
+      "officialIndex": "https://storage.googleapis.com/flutter_infra_release/releases/releases_macos.json",
+      "officialArchive": "stable/macos/flutter_macos_3.38.10-stable.zip",
+      "officialSha256": "b7056ba00082b9b814415e7516287bb94633c1108838bfe10f8f665307b99afa"
+    },
+    {
+      "id": "macos-arm64",
+      "os": "macos",
+      "cpu": "arm64",
+      "rustHost": "aarch64-apple-darwin",
+      "officialIndex": "https://storage.googleapis.com/flutter_infra_release/releases/releases_macos.json",
+      "officialArchive": "stable/macos/flutter_macos_arm64_3.38.10-stable.zip",
+      "officialSha256": "b3a8c004385273bfd9b9b901a72e3eb93ecaa65f4a7ca801ab22588aa05c490c"
+    },
+    {
+      "id": "windows-x64",
+      "os": "windows",
+      "cpu": "x64",
+      "rustHost": "x86_64-pc-windows-gnu",
+      "officialIndex": "https://storage.googleapis.com/flutter_infra_release/releases/releases_windows.json",
+      "officialArchive": "stable/windows/flutter_windows_3.38.10-stable.zip",
+      "officialSha256": "97e560d028f1b0b414e5f19ac2c4ebf079c001e8a18563a0e940c4d84700d334"
+    }
+  ]
+}

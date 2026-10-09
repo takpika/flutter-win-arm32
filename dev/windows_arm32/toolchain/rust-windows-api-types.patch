@@ -1,0 +1,155 @@
+--- a/windows-sys-0.52.0/src/Windows/Win32/Networking/WinSock/mod.rs
++++ b/windows-sys-0.52.0/src/Windows/Win32/Networking/WinSock/mod.rs
+@@ -4762,16 +4762,16 @@
+     }
+ }
+ #[repr(C)]
+-#[cfg(target_arch = "x86")]
++#[cfg(any(target_arch = "arm", target_arch = "x86"))]
+ pub struct SERVENT {
+     pub s_name: ::windows_sys::core::PSTR,
+     pub s_aliases: *mut *mut i8,
+     pub s_port: i16,
+     pub s_proto: ::windows_sys::core::PSTR,
+ }
+-#[cfg(target_arch = "x86")]
++#[cfg(any(target_arch = "arm", target_arch = "x86"))]
+ impl ::core::marker::Copy for SERVENT {}
+-#[cfg(target_arch = "x86")]
++#[cfg(any(target_arch = "arm", target_arch = "x86"))]
+ impl ::core::clone::Clone for SERVENT {
+     fn clone(&self) -> Self {
+         *self
+@@ -5933,7 +5933,7 @@
+     }
+ }
+ #[repr(C)]
+-#[cfg(target_arch = "x86")]
++#[cfg(any(target_arch = "arm", target_arch = "x86"))]
+ pub struct WSADATA {
+     pub wVersion: u16,
+     pub wHighVersion: u16,
+@@ -5943,9 +5943,9 @@
+     pub iMaxUdpDg: u16,
+     pub lpVendorInfo: ::windows_sys::core::PSTR,
+ }
+-#[cfg(target_arch = "x86")]
++#[cfg(any(target_arch = "arm", target_arch = "x86"))]
+ impl ::core::marker::Copy for WSADATA {}
+-#[cfg(target_arch = "x86")]
++#[cfg(any(target_arch = "arm", target_arch = "x86"))]
+ impl ::core::clone::Clone for WSADATA {
+     fn clone(&self) -> Self {
+         *self
+--- a/windows-sys-0.52.0/src/Windows/Win32/System/WindowsProgramming/mod.rs
++++ b/windows-sys-0.52.0/src/Windows/Win32/System/WindowsProgramming/mod.rs
+@@ -1379,7 +1379,7 @@
+     }
+ }
+ #[repr(C)]
+-#[cfg(target_arch = "x86")]
++#[cfg(any(target_arch = "arm", target_arch = "x86"))]
+ pub struct DELAYLOAD_INFO {
+     pub Size: u32,
+     pub DelayloadDescriptor: *mut IMAGE_DELAYLOAD_DESCRIPTOR,
+@@ -1390,9 +1390,9 @@
+     pub Unused: *mut ::core::ffi::c_void,
+     pub LastError: u32,
+ }
+-#[cfg(target_arch = "x86")]
++#[cfg(any(target_arch = "arm", target_arch = "x86"))]
+ impl ::core::marker::Copy for DELAYLOAD_INFO {}
+-#[cfg(target_arch = "x86")]
++#[cfg(any(target_arch = "arm", target_arch = "x86"))]
+ impl ::core::clone::Clone for DELAYLOAD_INFO {
+     fn clone(&self) -> Self {
+         *self
+--- a/windows-sys-0.59.0/src/Windows/Win32/Networking/WinSock/mod.rs
++++ b/windows-sys-0.59.0/src/Windows/Win32/Networking/WinSock/mod.rs
+@@ -3584,7 +3584,7 @@
+     pub s_port: i16,
+ }
+ #[repr(C)]
+-#[cfg(target_arch = "x86")]
++#[cfg(any(target_arch = "arm", target_arch = "x86"))]
+ #[derive(Clone, Copy)]
+ pub struct SERVENT {
+     pub s_name: windows_sys::core::PSTR,
+@@ -4275,7 +4275,7 @@
+     pub szSystemStatus: [i8; 129],
+ }
+ #[repr(C)]
+-#[cfg(target_arch = "x86")]
++#[cfg(any(target_arch = "arm", target_arch = "x86"))]
+ #[derive(Clone, Copy)]
+ pub struct WSADATA {
+     pub wVersion: u16,
+--- a/windows-sys-0.59.0/src/Windows/Win32/System/WindowsProgramming/mod.rs
++++ b/windows-sys-0.59.0/src/Windows/Win32/System/WindowsProgramming/mod.rs
+@@ -1134,7 +1134,7 @@
+     pub LastError: u32,
+ }
+ #[repr(C)]
+-#[cfg(target_arch = "x86")]
++#[cfg(any(target_arch = "arm", target_arch = "x86"))]
+ #[derive(Clone, Copy)]
+ pub struct DELAYLOAD_INFO {
+     pub Size: u32,
+--- a/windows-sys-0.61.2/src/Windows/Win32/Networking/WinSock/mod.rs
++++ b/windows-sys-0.61.2/src/Windows/Win32/Networking/WinSock/mod.rs
+@@ -3812,7 +3812,7 @@
+ pub const SENDER_MAX_LATE_JOINER_PERCENTAGE: u32 = 75u32;
+ pub type SEND_RECV_FLAGS = i32;
+ #[repr(C)]
+-#[cfg(target_arch = "x86")]
++#[cfg(any(target_arch = "arm", target_arch = "x86"))]
+ #[derive(Clone, Copy)]
+ pub struct SERVENT {
+     pub s_name: windows_sys::core::PSTR,
+@@ -3820,7 +3820,7 @@
+     pub s_port: i16,
+     pub s_proto: windows_sys::core::PSTR,
+ }
+-#[cfg(target_arch = "x86")]
++#[cfg(any(target_arch = "arm", target_arch = "x86"))]
+ impl Default for SERVENT {
+     fn default() -> Self {
+         unsafe { core::mem::zeroed() }
+@@ -5176,7 +5176,7 @@
+ }
+ pub type WSACOMPLETIONTYPE = i32;
+ #[repr(C)]
+-#[cfg(target_arch = "x86")]
++#[cfg(any(target_arch = "arm", target_arch = "x86"))]
+ #[derive(Clone, Copy)]
+ pub struct WSADATA {
+     pub wVersion: u16,
+@@ -5187,7 +5187,7 @@
+     pub iMaxUdpDg: u16,
+     pub lpVendorInfo: windows_sys::core::PSTR,
+ }
+-#[cfg(target_arch = "x86")]
++#[cfg(any(target_arch = "arm", target_arch = "x86"))]
+ impl Default for WSADATA {
+     fn default() -> Self {
+         unsafe { core::mem::zeroed() }
+--- a/windows-sys-0.61.2/src/Windows/Win32/System/WindowsProgramming/mod.rs
++++ b/windows-sys-0.61.2/src/Windows/Win32/System/WindowsProgramming/mod.rs
+@@ -686,7 +686,7 @@
+ pub const DECISION_LOCATION_UNKNOWN: DECISION_LOCATION = 9i32;
+ pub const DELAYLOAD_GPA_FAILURE: u32 = 4u32;
+ #[repr(C)]
+-#[cfg(target_arch = "x86")]
++#[cfg(any(target_arch = "arm", target_arch = "x86"))]
+ #[derive(Clone, Copy)]
+ pub struct DELAYLOAD_INFO {
+     pub Size: u32,
+@@ -698,7 +698,7 @@
+     pub Unused: *mut core::ffi::c_void,
+     pub LastError: u32,
+ }
+-#[cfg(target_arch = "x86")]
++#[cfg(any(target_arch = "arm", target_arch = "x86"))]
+ impl Default for DELAYLOAD_INFO {
+     fn default() -> Self {
+         unsafe { core::mem::zeroed() }

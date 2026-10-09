@@ -1,0 +1,4 @@
+Rustup 1.28.2
+https://github.com/rust-lang/rustup/tree/1.28.2
+Official host executables and SHA256 values are recorded in host-inputs.json.
+License files copied without modification from this tag.

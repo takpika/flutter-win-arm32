@@ -158,6 +158,65 @@ name: path_provider_example
       },
     );
 
+    for (final phone in <bool>[false, true]) {
+      for (final messaging in <bool>[false, true]) {
+        testUsingContext(
+          'SDK messaging registration: Phone=$phone dependency=$messaging',
+          () async {
+            final Directory projectDir = fileSystem.directory('project')..createSync();
+            writePackageConfigFiles(
+              directory: projectDir,
+              mainLibName: 'messaging_example',
+              packages: <String, String>{
+                if (messaging) 'firebase_messaging': '/firebase_messaging',
+              },
+            );
+            projectDir
+                .childFile('pubspec.yaml')
+                .writeAsStringSync(
+                  'name: messaging_example\n'
+                  '${messaging ? 'dependencies:\n  firebase_messaging: any\n' : ''}',
+                );
+            final File mainFile = projectDir.childDirectory('lib').childFile('main.dart')
+              ..createSync(recursive: true);
+            final environment = Environment.test(
+              fileSystem.currentDirectory,
+              projectDir: projectDir,
+              artifacts: Artifacts.test(),
+              fileSystem: fileSystem,
+              logger: BufferLogger.test(),
+              processManager: FakeProcessManager.any(),
+              defines: <String, String>{
+                kTargetFile: mainFile.absolute.path,
+                kTargetPlatform: 'windows-arm',
+                if (phone) kWindowsPhone: 'true',
+              },
+              generateDartPluginRegistry: true,
+            );
+            final FlutterProject project = FlutterProject.fromDirectoryTest(projectDir);
+            await DartPluginRegistrantTarget.test(project).build(environment);
+            final File generated = project.dartPluginRegistrant;
+            expect(generated.existsSync(), phone && messaging);
+            if (phone && messaging) {
+              final String contents = generated.readAsStringSync();
+              expect(contents, contains('WindowsPhoneFirebaseMessaging.registerWith('));
+              expect(contents, contains('/dev/windows_arm32/plugins/firebase_messaging/'));
+              expect(contents, contains('dispatcherLibraryUri:'));
+              expect(contents, contains('Platform.isWindows'));
+              // Switching the same checkout to desktop must remove this adapter.
+              environment.defines.remove(kWindowsPhone);
+              await DartPluginRegistrantTarget.test(project).build(environment);
+              expect(generated.existsSync(), isFalse);
+            }
+          },
+          overrides: <Type, Generator>{
+            ProcessManager: () => FakeProcessManager.any(),
+            Pub: ThrowingPub.new,
+          },
+        );
+      }
+    }
+
     testUsingContext(
       'regenerates dart_plugin_registrant.dart',
       () async {

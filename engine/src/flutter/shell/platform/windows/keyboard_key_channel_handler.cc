@@ -6,6 +6,8 @@
 
 #include <windows.h>
 
+#include <utility>
+
 #include "flutter/fml/logging.h"
 #include "flutter/shell/platform/common/json_message_codec.h"
 #include "flutter/shell/platform/windows/keyboard_utils.h"
@@ -63,49 +65,60 @@ static constexpr int kScrollLock = 1 << 13;
 /// Calls GetKeyState() an all modifier keys and packs the result in an int,
 /// with the re-defined values declared above for compatibility with the Flutter
 /// framework.
-int GetModsForKeyState() {
+int GetModsForKeyState(
+    const KeyboardKeyChannelHandler::GetKeyStateHandler& get_key_state) {
   int mods = 0;
 
-  if (GetKeyState(VK_SHIFT) < 0)
+  if (get_key_state(VK_SHIFT) < 0)
     mods |= kShift;
-  if (GetKeyState(VK_LSHIFT) < 0)
+  if (get_key_state(VK_LSHIFT) < 0)
     mods |= kShiftLeft;
-  if (GetKeyState(VK_RSHIFT) < 0)
+  if (get_key_state(VK_RSHIFT) < 0)
     mods |= kShiftRight;
-  if (GetKeyState(VK_CONTROL) < 0)
+  if (get_key_state(VK_CONTROL) < 0)
     mods |= kControl;
-  if (GetKeyState(VK_LCONTROL) < 0)
+  if (get_key_state(VK_LCONTROL) < 0)
     mods |= kControlLeft;
-  if (GetKeyState(VK_RCONTROL) < 0)
+  if (get_key_state(VK_RCONTROL) < 0)
     mods |= kControlRight;
-  if (GetKeyState(VK_MENU) < 0)
+  if (get_key_state(VK_MENU) < 0)
     mods |= kAlt;
-  if (GetKeyState(VK_LMENU) < 0)
+  if (get_key_state(VK_LMENU) < 0)
     mods |= kAltLeft;
-  if (GetKeyState(VK_RMENU) < 0)
+  if (get_key_state(VK_RMENU) < 0)
     mods |= kAltRight;
-  if (GetKeyState(VK_LWIN) < 0)
+  if (get_key_state(VK_LWIN) < 0)
     mods |= kWinLeft;
-  if (GetKeyState(VK_RWIN) < 0)
+  if (get_key_state(VK_RWIN) < 0)
     mods |= kWinRight;
-  if (GetKeyState(VK_CAPITAL) < 0)
+  if (get_key_state(VK_CAPITAL) < 0)
     mods |= kCapsLock;
-  if (GetKeyState(VK_NUMLOCK) < 0)
+  if (get_key_state(VK_NUMLOCK) < 0)
     mods |= kNumLock;
-  if (GetKeyState(VK_SCROLL) < 0)
+  if (get_key_state(VK_SCROLL) < 0)
     mods |= kScrollLock;
   return mods;
 }
 
 }  // namespace
 
+#if WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP)
 KeyboardKeyChannelHandler::KeyboardKeyChannelHandler(
     flutter::BinaryMessenger* messenger)
+    : KeyboardKeyChannelHandler(messenger, GetKeyState) {}
+#endif
+
+KeyboardKeyChannelHandler::KeyboardKeyChannelHandler(
+    flutter::BinaryMessenger* messenger,
+    GetKeyStateHandler get_key_state)
     : channel_(
           std::make_unique<flutter::BasicMessageChannel<rapidjson::Document>>(
               messenger,
               kChannelName,
-              &flutter::JsonMessageCodec::GetInstance())) {}
+              &flutter::JsonMessageCodec::GetInstance())),
+      get_key_state_(std::move(get_key_state)) {
+  FML_CHECK(get_key_state_);
+}
 
 KeyboardKeyChannelHandler::~KeyboardKeyChannelHandler() = default;
 
@@ -138,7 +151,7 @@ void KeyboardKeyChannelHandler::KeyboardHook(
                   allocator);
   event.AddMember(kCharacterCodePointKey, UndeadChar(character), allocator);
   event.AddMember(kKeyMapKey, kWindowsKeyMap, allocator);
-  event.AddMember(kModifiersKey, GetModsForKeyState(), allocator);
+  event.AddMember(kModifiersKey, GetModsForKeyState(get_key_state_), allocator);
 
   switch (action) {
     case WM_SYSKEYDOWN:

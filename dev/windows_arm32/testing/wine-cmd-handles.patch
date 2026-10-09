@@ -1,0 +1,186 @@
+--- a/programs/cmd/wcmdmain.c
++++ b/programs/cmd/wcmdmain.c
+@@ -2122,36 +2122,67 @@
+ 
+ static DWORD std_index[3] = {STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE};
+ 
+-static void pop_std_redirections(HANDLE saved[3])
++/* Logical command handles are independent of kernel HANDLE values. */
++#define CMD_HANDLE_COUNT 10
++static HANDLE extra_handles[CMD_HANDLE_COUNT - 3];
++
++static HANDLE command_handle(unsigned int fd)
++{
++    return fd < 3 ? GetStdHandle(std_index[fd]) : extra_handles[fd - 3];
++}
++
++static void set_command_handle(unsigned int fd, HANDLE handle)
++{
++    if (fd < 3) SetStdHandle(std_index[fd], handle);
++    else extra_handles[fd - 3] = handle;
++}
++
++static BOOL saved_handle(HANDLE handle, const HANDLE *saved, unsigned int count)
+ {
+     unsigned int i;
+-
+-    /* Restore old handles */
+-    for (i = 0; i < 3; i++)
+-    {
+-        if (saved[i] != GetStdHandle(std_index[i]))
+-        {
+-            if (std_index[i] == STD_OUTPUT_HANDLE)
+-                WCMD_output_flush();
+-            CloseHandle(GetStdHandle(std_index[i]));
+-            SetStdHandle(std_index[i], saved[i]);
+-        }
+-    }
+-}
+-
+-static BOOL push_std_redirections(CMD_REDIRECTION *redir, HANDLE saved[3])
++    for (i = 0; i < count; ++i)
++        if (saved[i] == handle) return TRUE;
++    return FALSE;
++}
++
++static void pop_std_redirections(HANDLE saved[CMD_HANDLE_COUNT])
++{
++    HANDLE closed[CMD_HANDLE_COUNT];
++    unsigned int i, count = 0;
++
++    if (saved[1] != GetStdHandle(STD_OUTPUT_HANDLE)) WCMD_output_flush();
++    for (i = 0; i < CMD_HANDLE_COUNT; ++i)
++    {
++        HANDLE handle = command_handle(i);
++        /* Implicit backup slots borrow parent handles; do not close them. */
++        if (handle && handle != INVALID_HANDLE_VALUE &&
++            !saved_handle(handle, saved, CMD_HANDLE_COUNT) &&
++            !saved_handle(handle, closed, count))
++        {
++            CloseHandle(handle);
++            closed[count++] = handle;
++        }
++    }
++    for (i = 0; i < CMD_HANDLE_COUNT; ++i) set_command_handle(i, saved[i]);
++}
++
++static BOOL push_std_redirections(CMD_REDIRECTION *redir, HANDLE saved[CMD_HANDLE_COUNT])
+ {
+     static SECURITY_ATTRIBUTES sa = {.nLength = sizeof(sa), .lpSecurityDescriptor = NULL, .bInheritHandle = TRUE};
+     WCHAR expanded_filename[MAXSTRING];
+     HANDLE h;
+     unsigned int i;
+ 
+-    for (i = 0; i < ARRAY_SIZE(std_index); i++)
+-        saved[i] = GetStdHandle(std_index[i]);
++    for (i = 0; i < CMD_HANDLE_COUNT; i++) saved[i] = command_handle(i);
+     for (; redir; redir = redir->next)
+     {
+         CMD_REDIRECTION *next;
+ 
++        if (redir->fd >= CMD_HANDLE_COUNT)
++        {
++            SetLastError(ERROR_INVALID_HANDLE);
++            return FALSE;
++        }
+         /* if we have several elements changing same std stream, only use last one */
+         for (next = redir->next; next; next = next->next)
+             if (redir->fd == next->fd) break;
+@@ -2189,13 +2220,13 @@
+             }
+             break;
+         case REDIR_WRITE_CLONE:
+-            if (redir->clone > 2 || redir->clone == redir->fd)
++            if (redir->clone >= CMD_HANDLE_COUNT || redir->clone == redir->fd)
+             {
+                 WARN("Can't duplicate %d from %d\n", redir->fd, redir->clone);
+                 return FALSE;
+             }
+             if (!DuplicateHandle(GetCurrentProcess(),
+-                                 GetStdHandle(std_index[redir->clone]),
++                                 command_handle(redir->clone),
+                                  GetCurrentProcess(),
+                                  &h,
+                                  0, TRUE, DUPLICATE_SAME_ACCESS))
+@@ -2205,13 +2236,20 @@
+             }
+             break;
+         }
+-        if (redir->fd > 2)
+-            CloseHandle(h);
+-        else
+-        {
++        if (redir->fd < 3)
++        {
++            /* cmd exposes saved standard streams in the first free slot. */
++            for (i = 3; i < CMD_HANDLE_COUNT; ++i)
++                if (!command_handle(i))
++                {
++                    set_command_handle(i, command_handle(redir->fd));
++                    break;
++                }
+             if (std_index[redir->fd] == STD_OUTPUT_HANDLE) WCMD_output_flush();
+-            SetStdHandle(std_index[redir->fd], h);
+-        }
++        }
++        /* Keep nonstandard handles open for the whole redirected command,
++         * including exclusive lock handles such as Flutter's handle 9. */
++        set_command_handle(redir->fd, h);
+     }
+     return TRUE;
+ }
+@@ -2450,7 +2488,7 @@
+       if (sc.is_command_file)
+       {
+           return_code = run_command_file(sc.path, command);
+-          if (WCMD_is_break(return_code))
++          if (WCMD_is_break(return_code) || return_code == RETURN_CODE_EXITED)
+               return_code = errorlevel;
+           else if (return_code != NO_ERROR)
+               errorlevel = return_code;
+@@ -2812,7 +2850,7 @@
+     CMD_FOR_CONTROL *for_ctrl = NULL;
+     union token_parameter pmt;
+     enum builder_token tkn;
+-    BOOL done, do_echo = TRUE;
++    BOOL done = FALSE, do_echo = TRUE;
+ 
+ #define ERROR_IF(x) if (x) {bogus_line = __LINE__; goto error_handling;}
+     do
+@@ -3866,6 +3904,13 @@
+           */
+           if ((lexer_at_command_start(&builder) || node_builder_top(&builder, 0) == TKN_IN) &&
+               lexer_white_space_only(curString, curStringLen)) {
++              /* A leading redirect belongs to the block, not its first line. */
++              if (curRedirsLen)
++              {
++                  curStringLen = 0;
++                  lexer_push_command(&builder, curString, &curStringLen,
++                                     curRedirs, &curRedirsLen, &curCopyTo, &curLen);
++              }
+               node_builder_push_token(&builder, TKN_OPENPAR);
+           } else {
+               curCopyTo[(*curLen)++] = *curPos;
+@@ -4514,11 +4559,12 @@
+             }
+             else
+             {
+-                HANDLE saved[3];
++                HANDLE saved[CMD_HANDLE_COUNT];
+ 
+                 if (!push_std_redirections(node->redirects, saved))
+                 {
+                     WCMD_print_error();
++                    pop_std_redirections(saved);
+                     return ERROR_INVALID_FUNCTION;
+                 }
+ 
+@@ -4614,7 +4660,7 @@
+ 
+ static RETURN_CODE node_execute_with_echo(CMD_NODE *node, BOOL with_echo)
+ {
+-    HANDLE saved[3];
++    HANDLE saved[CMD_HANDLE_COUNT];
+     RETURN_CODE return_code;
+     int test;
+ 

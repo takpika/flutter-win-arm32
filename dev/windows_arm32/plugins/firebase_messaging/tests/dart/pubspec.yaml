@@ -1,0 +1,12 @@
+name: flutter_phone_firebase_bridge_contract
+publish_to: none
+environment:
+  sdk: '>=3.6.0 <4.0.0'
+dependencies:
+  flutter:
+    sdk: flutter
+  firebase_core: 4.15.0
+  firebase_messaging: 16.7.0
+dev_dependencies:
+  flutter_test:
+    sdk: flutter

@@ -1,0 +1,205 @@
+name: Windows ARM32 Windows host compiler
+
+on:
+  workflow_call:
+    inputs:
+      python_run_id:
+        type: string
+        required: true
+      compiler_run_id:
+        type: string
+        default: ''
+      compile:
+        type: boolean
+        default: true
+      resources_only:
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      python_run_id:
+        description: Successful four-host Python payload workflow run
+        required: true
+        default: '38388564532'
+      compiler_run_id:
+        description: Reuse a successful raw Windows compiler build run for packaging
+        default: ''
+      compile:
+        description: Build the complete Windows x64 LLVM compiler after dependencies
+        type: boolean
+        default: true
+      resources_only:
+        description: Build resource utilities from the same shared LLVM source without rebuilding Clang
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  compiler:
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    timeout-minutes: 360
+    steps:
+      - name: Prepare ordinary Ubuntu amd64 build container
+        run: |
+          test "$(uname -m)" = x86_64
+          mkdir -p "$GITHUB_WORKSPACE/_work/tmp"
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential clang cmake ninja-build \
+            git curl ca-certificates python3 python3-pip xz-utils zstd pkg-config \
+            libxml2-dev libzstd-dev zlib1g-dev
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: inputs.compiler_run_id == ''
+        with:
+          name: windows-arm32-python-windows-x64
+          run-id: ${{ inputs.python_run_id }}
+          github-token: ${{ github.token }}
+          path: _work/python-inputs/windows
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: inputs.compiler_run_id == ''
+        with:
+          name: windows-arm32-python-linux-x64
+          run-id: ${{ inputs.python_run_id }}
+          github-token: ${{ github.token }}
+          path: _work/python-inputs/linux
+      - name: Verify and extract complete Python distributions
+        if: inputs.compiler_run_id == ''
+        run: |
+          mkdir -p _work/tmp _work/python-windows _work/python-linux
+          echo "TMPDIR=$GITHUB_WORKSPACE/_work/tmp" >> "$GITHUB_ENV"
+          tar -xzf _work/python-inputs/windows/python-windows-x64.tar.gz -C _work/python-windows
+          tar -xzf _work/python-inputs/linux/python-linux-x64.tar.gz -C _work/python-linux
+          python3 -B - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          for host in ('windows', 'linux'):
+              root = Path('_work/python-' + host)
+              report = json.loads((root / 'python-provenance.json').read_text())
+              if report['host'] != host + '-x64':
+                  raise SystemExit('Unexpected Python host')
+              for name, expected in report['files'].items():
+                  if hashlib.sha256((root / name).read_bytes()).hexdigest() != expected:
+                      raise SystemExit('Python payload changed: ' + name)
+          PY
+      - name: Prepare pinned Windows GNU cross compiler
+        run: |
+          mkdir -p _work/tmp
+          echo "TMPDIR=$GITHUB_WORKSPACE/_work/tmp" >> "$GITHUB_ENV"
+          archive=llvm-mingw-20251104-ucrt-ubuntu-22.04-x86_64.tar.xz
+          curl --fail --location --retry 3 \
+            "https://github.com/mstorsjo/llvm-mingw/releases/download/20251104/$archive" \
+            --output "_work/$archive"
+          echo "3aed6fa47be909884cb3e5634d6b7254604d7104832d6312f8435fb23d5a9bab  _work/$archive" | sha256sum --check
+          tar -xf "_work/$archive" -C _work
+      - name: Build complete private compression and XML dependencies
+        if: inputs.compiler_run_id == ''
+        run: |
+          python3 -B dev/windows_arm32/toolchain/prepare_windows_host_dependencies.py \
+            --gnu _work/llvm-mingw-20251104-ucrt-ubuntu-22.04-x86_64 \
+            --native-python _work/python-linux/bin/python3.14 \
+            --windows-python _work/python-windows --output _work/dependencies --jobs 2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: inputs.compile && inputs.compiler_run_id == ''
+        with:
+          repository: llvm/llvm-project
+          ref: e77ac8049afab1ed6dcd048a65c0e5c030293c84
+          path: _work/llvm-project
+          persist-credentials: false
+          sparse-checkout: |
+            clang
+            cmake
+            lld
+            libunwind
+            llvm
+            third-party
+      - name: Build native generators from the same patched LLVM source
+        if: inputs.compile && inputs.compiler_run_id == ''
+        run: |
+          python3 -B - <<'PY'
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, 'dev/windows_arm32/toolchain')
+          from build_compiler import prepare
+          prepare(Path('_work/llvm-project').resolve())
+          PY
+          cmake -G Ninja -S _work/llvm-project/llvm -B _work/native-generators \
+            -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_PROJECTS=clang \
+            -DLLVM_ENABLE_ASSERTIONS=ON -DLLVM_TARGETS_TO_BUILD=all
+          cmake --build _work/native-generators --parallel 2 \
+            --target llvm-tblgen clang-tblgen llvm-min-tblgen
+          echo "set(LLVM_NATIVE_TOOL_DIR \"$GITHUB_WORKSPACE/_work/native-generators/bin\" CACHE PATH \"\")" \
+            >> _work/dependencies/windows-x64.cmake
+      - name: Build complete Windows x64 compiler from shared patched source
+        if: inputs.compile && inputs.compiler_run_id == ''
+        env:
+          RESOURCES_ONLY: ${{ inputs.resources_only }}
+        run: |
+          tools=()
+          if [[ "$RESOURCES_ONLY" == true ]]; then tools=(--tools-only llvm-rc llvm-cvtres); fi
+          python3 -B dev/windows_arm32/toolchain/build_host_compiler.py \
+            --host windows-x64 --source _work/llvm-project --output _work/compiler \
+            --toolchain _work/dependencies/windows-x64.cmake \
+            --dependency-prefix _work/dependencies/prefix --jobs 2 "${tools[@]}"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: inputs.compiler_run_id != ''
+        with:
+          name: windows-arm32-windows-x64-native-build
+          run-id: ${{ inputs.compiler_run_id }}
+          github-token: ${{ github.token }}
+          path: _work/prior-build
+      - name: Package complete compiler with private DLL dependency auditing
+        if: (inputs.compile || inputs.compiler_run_id != '') && !inputs.resources_only
+        env:
+          PRIOR_BUILD_RUN: ${{ inputs.compiler_run_id }}
+        run: |
+          build_root=_work
+          if [[ -n "$PRIOR_BUILD_RUN" ]]; then build_root=_work/prior-build; fi
+          python3 -B dev/windows_arm32/toolchain/package_windows_host_compiler.py \
+            --source "$build_root/compiler" --dependencies "$build_root/dependencies/prefix" \
+            --gnu _work/llvm-mingw-20251104-ucrt-ubuntu-22.04-x86_64 \
+            --llvm-readobj _work/llvm-mingw-20251104-ucrt-ubuntu-22.04-x86_64/bin/llvm-readobj \
+            --output _work/windows-arm32-compiler-windows-x64
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: (inputs.compile || inputs.compiler_run_id != '') && !inputs.resources_only
+        with:
+          name: windows-arm32-compiler-windows-x64
+          path: |
+            _work/windows-arm32-compiler-windows-x64.tar.gz
+            _work/windows-arm32-compiler-windows-x64.tar.gz.sha256
+            _work/windows-arm32-compiler-windows-x64/distribution-manifest.json
+          if-no-files-found: error
+      - name: Package common source-built resource utilities
+        if: inputs.resources_only
+        run: |
+          python3 -B dev/windows_arm32/toolchain/package_resource_tools.py \
+            --source _work/compiler --dependencies _work/dependencies/prefix \
+            --gnu _work/llvm-mingw-20251104-ucrt-ubuntu-22.04-x86_64 \
+            --output _work/windows-arm32-resource-tools-windows-x64
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: inputs.resources_only
+        with:
+          name: windows-arm32-resource-tools-windows-x64
+          path: _work/windows-arm32-resource-tools-windows-x64.tar.gz*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: failure()
+        with:
+          name: windows-arm32-windows-x64-build-diagnostics
+          path: |
+            _work/dependencies/build-*/CMakeCache.txt
+            _work/dependencies/build-*/CMakeFiles/CMakeConfigureLog.yaml
+            _work/dependencies/build-iconv/config.log
+            _work/compiler/CMakeCache.txt
+            _work/compiler/CMakeFiles/CMakeConfigureLog.yaml
+          if-no-files-found: warn

@@ -1,0 +1,8 @@
+# The generator runs on Windows x64 but emits the selected Dart target ISA.
+assert(flutter_windows_snapshot_tool != "")
+import("//build/toolchain/windows_arm32/coff_toolchain.gni")
+
+windows_arm32_coff_toolchain("x64") {
+  driver = flutter_windows_snapshot_tool
+  cpu = "x64"
+}

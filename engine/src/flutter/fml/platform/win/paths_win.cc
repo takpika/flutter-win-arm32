@@ -55,10 +55,15 @@ size_t LastSeparator(const std::string& path) {
 }  // namespace
 
 std::pair<bool, std::string> GetExecutablePath() {
+#if defined(FLUTTER_WINDOWS_PHONE)
+  // A null module asks GetModuleFileNameW for the executable directly.
+  HMODULE module = nullptr;
+#else
   HMODULE module = GetModuleHandle(NULL);
   if (module == NULL) {
     return {false, ""};
   }
+#endif
   wchar_t path[MAX_PATH];
   DWORD read_size = GetModuleFileNameW(module, path, MAX_PATH);
   if (read_size == 0 || read_size == MAX_PATH) {

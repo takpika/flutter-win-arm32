@@ -1,0 +1,194 @@
+{
+  "upstreamRevision": "7c8a3e077e8a3c6209c865301aada26e9fde764a",
+  "files": [
+    {
+      "path": "pkg/vm/lib/modular/transformations/ffi/abi.dart",
+      "originalSha256": "afbcebc8fb712330433fb5bb724dd62b815bc1ace4814d0f367b0b7dc67f553d",
+      "patchedSha256": "ebf4afe35c22bf7f928047007c7061ea2376fa2f84838e8b4e996003d1c80d74"
+    },
+    {
+      "path": "runtime/BUILD.gn",
+      "originalSha256": "945726aff8340b03202d5e65a0b7ea5a3e045529570adddb3ffd8c9e2906e552",
+      "patchedSha256": "a4675c0e06752633d03dd55d2526a22bd4e46f7f4f5dff1eb51fd7636980169b"
+    },
+    {
+      "path": "runtime/bin/BUILD.gn",
+      "originalSha256": "c81626e0a58877ed1f6ee3c8fcaf8edfa4d88eaf2bcf52dec9ad09237c9302e5",
+      "patchedSha256": "d777d83688698b77814890a171914f4d5a3ebd563517d6191a3c231233aaaee1"
+    },
+    {
+      "path": "runtime/bin/console_win.cc",
+      "originalSha256": "fcacfe7e33cc9fb2f504f169c16fa3defadb2edae1ed3985357cf4f636e9f07c",
+      "patchedSha256": "3807a52169a457cb73eddd2f3b6ceb01a676b4c1114b8a8347be86ba158e8247"
+    },
+    {
+      "path": "runtime/bin/directory_win.cc",
+      "originalSha256": "469c8427833c1cfb018fe251de0f56d312ce3e4d2dd227870f53b0166e0b9174",
+      "patchedSha256": "7ee438b8f02fec48a79fc113557ec7036fe0a4a3651383f1fb75cde546d3895a"
+    },
+    {
+      "path": "runtime/bin/eventhandler_win.h",
+      "originalSha256": "0a7448792aaf942cf5a3d8a907b3e125b14daa026ad943c35791b5d9b3273fc7",
+      "patchedSha256": "358803c591035c598a59acc1d67f7ab005086f43fd248ac4b5271022ffd429fc"
+    },
+    {
+      "path": "runtime/bin/file_system_watcher_win.cc",
+      "originalSha256": "894bbc053bd7b7119543968167cc5138d08900e6b5581a4c07073d81e3224885",
+      "patchedSha256": "4fed29d834fd1420ec7eb453bf78574a31f3dce15bf22274489cb1f4b53c6e3e"
+    },
+    {
+      "path": "runtime/bin/file_win.cc",
+      "originalSha256": "74d4a237715d6f9198ac7db826370c574ed8014eb05da4b9f6ca8add7aaf4057",
+      "patchedSha256": "6c76c188fa555d2a95b2cfcfb1ba73ac2f5975b72fc787700ed776de06c3483a"
+    },
+    {
+      "path": "runtime/bin/platform_win.cc",
+      "originalSha256": "e326d6e627c057c12882f189cb6a6d2207f8b9484ce1609348f6efeb93e60045",
+      "patchedSha256": "bac1159e44701e35502854e4beec62f5aad0f0badcbcb02673fd3f5c2dee61b6"
+    },
+    {
+      "path": "runtime/bin/socket_base_win.cc",
+      "originalSha256": "fd4bae0de963d65cbf32c948283aba195fd1f06bfd8ea16ba60ff3dde793ce03",
+      "patchedSha256": "ce48cbcce378a32a31e3524794527bc0f9e099956ddb107abbf0640e260fca4f"
+    },
+    {
+      "path": "runtime/bin/socket_base_win.h",
+      "originalSha256": "f3b6691c1aaccf844894746833df17bb2903574c362426a718601b90f05ed111",
+      "patchedSha256": "3096618f0b9d2a089b2447bf0009cb9463e7a7d53c73d0c3c887658ae6d0f6ec"
+    },
+    {
+      "path": "runtime/bin/virtual_memory_win.cc",
+      "originalSha256": "655c51ae9494edbe79895ef880fdec864814075ab0e8e8062df0cc97c4278a4e",
+      "patchedSha256": "56837989a0e06bb590e887a699a4bf05c6f8ff3c537ba6d9c154fb84c8b7aa1a"
+    },
+    {
+      "path": "runtime/platform/globals.h",
+      "originalSha256": "b9c514a8e38bdba1080366aa9870320bc20defe124ba19b3006fed11b7c21a5f",
+      "patchedSha256": "f00532af995013f1da85a7834d24a219e232f4d8e8b615c5bf0db37c76354029"
+    },
+    {
+      "path": "runtime/platform/utils.cc",
+      "originalSha256": "11e58177f72fcdd0c37e515a676e8fb5bff9f82a837eef66c732e7b412afe110",
+      "patchedSha256": "cae4b18c392053f285e913343ff0ea3f268d40a7edf774aa63137efdbbbae5bd"
+    },
+    {
+      "path": "runtime/vm/app_snapshot.cc",
+      "originalSha256": "3fc6daaad2930aa0f0715bedcf785988d380eea5a9b654d68e639d572f3e74e7",
+      "patchedSha256": "d8b4835d02dcbea636ba08b520a1bb76d2fc0410663394a966dcbefe63227036"
+    },
+    {
+      "path": "runtime/vm/code_patcher_arm.cc",
+      "originalSha256": "666e46bdf02f994dc07fa4dae8a61e2b26309e78efc2cbc21ad631f94cf83ac0",
+      "patchedSha256": "6ee90fe87cacade1498b1eb9afdd10f4d90f5b4428c25c8e9427a6357bc8ab45"
+    },
+    {
+      "path": "runtime/vm/compiler/asm_intrinsifier_arm.cc",
+      "originalSha256": "400a2b51cd2526b7fe560a7e576ac5577d3941f15fc8629a6cc17e5dc1cc7def",
+      "patchedSha256": "6101451b3328cd6d0d8e91de0ac9cb205bf6a71efa560b8a817c71ae74fbe377"
+    },
+    {
+      "path": "runtime/vm/compiler/assembler/assembler_arm.cc",
+      "originalSha256": "08bbe1ca9274679676fe75b2c515bd6feb55e3b9fc5b6dc6852e6c2f02e33c50",
+      "patchedSha256": "c9e7eacbd562c7a5f327b8824639e21db3b01a19544c97e269de2cbaf3189dfc"
+    },
+    {
+      "path": "runtime/vm/compiler/backend/il_arm.cc",
+      "originalSha256": "7b214e3673bc2ea12786a0c4a10d32498c3590af4a28681a729404cf15899c2c",
+      "patchedSha256": "1d66305e55af7350f8f5205024e19129b052b67a7158ad35cbec514f487b9723"
+    },
+    {
+      "path": "runtime/vm/compiler/ffi/abi.h",
+      "originalSha256": "e6ccc5ef7f4e75996596b60ef105724c79398bf1faeefd4eaedbedb08590cd07",
+      "patchedSha256": "bbac6801f795923edc9c20193babee234bc57cdb651f74b8c4f73ae1a0eaf607"
+    },
+    {
+      "path": "runtime/vm/compiler/runtime_offsets_extracted.h",
+      "originalSha256": "81bc9b996eea0cdce1b0168906341835bf334be838d080633a26cfa223855ce2",
+      "patchedSha256": "b44a20732b98c5d774585e1941328922ab444be29389e900c3b9594f82bcb933"
+    },
+    {
+      "path": "runtime/vm/compiler/stub_code_compiler.cc",
+      "originalSha256": "18acb1fb3f592b7acbdab3e2ad2ce497073a5ca4b8095ab013bbf165923addb6",
+      "patchedSha256": "cb63770d55e079eb0265777284d889802c8729d7dcd30da3feadf091b0a50c71"
+    },
+    {
+      "path": "runtime/vm/compiler/stub_code_compiler_arm.cc",
+      "originalSha256": "b56da9cc0fa4267f595e78fc617a937a76c07f470670d08f46dc1dfdd089cff7",
+      "patchedSha256": "1140529904a4e8bdaf025f94a0f8cd0afcfe0bd6ce934bb383c2e45abeaaab20"
+    },
+    {
+      "path": "runtime/vm/cpu_arm.cc",
+      "originalSha256": "35539e9137446d6395c99dcf67bd9142bbf6df5025a15f29c35330fe51f4aa95",
+      "patchedSha256": "1cd69096fedbbdd081c54ea72f5712e7e983ec7f2de4464468720606c7192586"
+    },
+    {
+      "path": "runtime/vm/instructions_arm.cc",
+      "originalSha256": "5a4cf45b274110da7f0ca23f02367248038ad07fbe8ba5d7447f952132f334d1",
+      "patchedSha256": "fab6c3d2ece0428b2c4566465dfa9091d83fd0745b47e69b29202e6f9cb6a381"
+    },
+    {
+      "path": "runtime/vm/isolate.cc",
+      "originalSha256": "8582e97f9b4870164f3d40b1df44caad035ddc2b92cd9796299ccbfd793ae497",
+      "patchedSha256": "65b2f2a413c3d06fdde3dbf155a528be5976d2d491b561fb2c217089d4890514"
+    },
+    {
+      "path": "runtime/vm/object.h",
+      "originalSha256": "b007295ceaa1c48de68c6b02d0730811b5ca6a16f2fdb50c7983c71dd478c30c",
+      "patchedSha256": "479fbf646ca1c7b6972112e552b18b58f099aa831cae576ba63e23726df67f38"
+    },
+    {
+      "path": "runtime/vm/os_thread_win.cc",
+      "originalSha256": "6c24921be8a91a84e476a00d3cce085d51fe9c9f362ac27746eaf199a233d05d",
+      "patchedSha256": "72b72675502c1a6b809aab495c0450e0bf64956798fec5912893b00cc992e26e"
+    },
+    {
+      "path": "runtime/vm/os_win.cc",
+      "originalSha256": "33da38436851f7252af5fd71ba665105b394bde1161d3388c14483b025ce9e66",
+      "patchedSha256": "755178f3dd235d3c3b9ecd38b8e44eb8e27f98037eac67ac51316231c5bf8e46"
+    },
+    {
+      "path": "runtime/vm/stack_frame.cc",
+      "originalSha256": "3e2e7c0cd31254038dce92a24b13327ad9d36136e4de5ece30415e0548f7fbd7",
+      "patchedSha256": "9023f6df427aa296236bb53e9dbf843111ffeee7b09c68548118516c46b06c5f"
+    },
+    {
+      "path": "runtime/vm/virtual_memory_win.cc",
+      "originalSha256": "80900607649cb3324c2329dd94497b6da42dcf4e35cdd432d8e6ce9186daec46",
+      "patchedSha256": "98bb3df3ed845902497e25a7e85e5c173ef4a6a2f7a1f9952ca492b78f94506f"
+    },
+    {
+      "path": "sdk/BUILD.gn",
+      "originalSha256": "3de0a3b6c85fdcdbccc1977d863b7bbd8c3e9d8a6759a67815bebbf1a473c06c",
+      "patchedSha256": "1a561f6de56810c599fe8ebd4821eb58d1544677519c6527e8ee3e32aa2821aa"
+    },
+    {
+      "path": "sdk/lib/ffi/abi.dart",
+      "originalSha256": "277b0d00103b0ab17b1e99d65263ea686b82ee70ce564a99d70a4db80eac10bd",
+      "patchedSha256": "fa72518da1e986d373cf1ecd6cead17a2f11f2cd18db1f5931ab375f8fda544c"
+    },
+    {
+      "path": "sdk/lib/ffi/c_type.dart",
+      "originalSha256": "a2890ecd2b1102d7c6a30de602a501cc90b33d3090d24c6cc97850ef6b52d43a",
+      "patchedSha256": "acaeaaef24247021c7de8e82475bb00443880c1cf79cd02475e8d45d58d3ef2d"
+    }
+  ],
+  "sharedRtAndPhoneSources": true,
+  "historicalVmBinariesIncluded": false,
+  "restoredFiles": [
+    {
+      "path": "runtime/bin/process_win.cc",
+      "upstreamSha256": "aa2fb3a111715250b25c7023d5f8a0f2524c8d212b22ba69673c60ddb918aaa1"
+    },
+    {
+      "path": "runtime/lib/ffi_dynamic_library.cc",
+      "upstreamSha256": "d70338af2195253691f72b589388d22e3d751671a637aa4f4bd920fcfc7fa386"
+    },
+    {
+      "path": "runtime/bin/native_assets_api_impl.cc",
+      "upstreamSha256": "2d512e78359e7d22c9f4672aaea4aaefc1827c6dafa2d608e86627cd49a45ca6"
+    }
+  ],
+  "removedFiles": [
+    "runtime/bin/process_phone.inc"
+  ]
+}

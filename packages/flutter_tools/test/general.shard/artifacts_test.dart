@@ -41,6 +41,31 @@ void main() {
       );
     });
 
+    testWithoutContext('Windows ARM32 selects the native Windows snapshot launcher', () {
+      final windowsArtifacts = CachedArtifacts(
+        fileSystem: fileSystem,
+        cache: cache,
+        platform: FakePlatform(operatingSystem: 'windows'),
+        operatingSystemUtils: FakeOperatingSystemUtils(),
+      );
+      expect(
+        windowsArtifacts.getArtifactPath(
+          Artifact.genSnapshot,
+          platform: TargetPlatform.windows_arm,
+          mode: BuildMode.release,
+        ),
+        fileSystem.path.join(
+          'root',
+          'bin',
+          'cache',
+          'artifacts',
+          'engine',
+          'windows-arm-release',
+          'gen_snapshot.exe',
+        ),
+      );
+    });
+
     testWithoutContext('getArtifactPath', () {
       final String xcframeworkPath = artifacts.getArtifactPath(
         Artifact.flutterXcframework,

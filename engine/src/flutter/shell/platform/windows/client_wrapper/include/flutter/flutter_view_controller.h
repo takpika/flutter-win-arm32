@@ -32,6 +32,12 @@ class FlutterViewController {
   // |dart_project| will be used to configure the engine backing this view.
   FlutterViewController(int width, int height, const DartProject& project);
 
+  // Creates a FlutterView backed by an existing engine. This is useful when
+  // plugins must be registered before Dart starts executing.
+  FlutterViewController(int width,
+                        int height,
+                        std::shared_ptr<FlutterEngine> engine);
+
   virtual ~FlutterViewController();
 
   // Prevent copying.

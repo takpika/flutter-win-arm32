@@ -112,6 +112,10 @@ bool Manager::InitializeDisplay(GpuPreference gpu_preference) {
       3,
       EGL_PLATFORM_ANGLE_ENABLE_AUTOMATIC_TRIM_ANGLE,
       EGL_TRUE,
+#if defined(_M_ARM) || defined(__arm__)
+      EGL_EXPERIMENTAL_PRESENT_PATH_ANGLE,
+      EGL_EXPERIMENTAL_PRESENT_PATH_FAST_ANGLE,
+#endif
       EGL_NONE,
   };
 
@@ -283,17 +287,30 @@ std::unique_ptr<WindowSurface> Manager::CreateWindowSurface(HWND hwnd,
   // Disable ANGLE's automatic surface resizing and provide an explicit size.
   // The surface will need to be destroyed and re-created if the HWND is
   // resized.
-  const EGLint surface_attributes[] = {EGL_FIXED_SIZE_ANGLE,
-                                       EGL_TRUE,
-                                       EGL_WIDTH,
-                                       static_cast<EGLint>(width),
-                                       EGL_HEIGHT,
-                                       static_cast<EGLint>(height),
-                                       EGL_NONE};
+#if defined(_M_ARM) || defined(__arm__)
+  const EGLint surface_attributes[] = {
+      EGL_WIDTH,
+      static_cast<EGLint>(width),
+      EGL_HEIGHT,
+      static_cast<EGLint>(height),
+      EGL_NONE};
+
+  auto const surface = ::eglCreatePbufferSurface(display_, config_,
+                                                 surface_attributes);
+#else
+  const EGLint surface_attributes[] = {
+      EGL_FIXED_SIZE_ANGLE,
+      EGL_TRUE,
+      EGL_WIDTH,
+      static_cast<EGLint>(width),
+      EGL_HEIGHT,
+      static_cast<EGLint>(height),
+      EGL_NONE};
 
   auto const surface = ::eglCreateWindowSurface(
       display_, config_, static_cast<EGLNativeWindowType>(hwnd),
       surface_attributes);
+#endif
   if (surface == EGL_NO_SURFACE) {
     LogEGLError("Surface creation failed.");
     return nullptr;
