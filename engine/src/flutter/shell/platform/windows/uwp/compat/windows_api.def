@@ -1,0 +1,21 @@
+LIBRARY flutter_winrt_compat.dll
+EXPORTS
+  CoTaskMemAlloc=combase.CoTaskMemAlloc
+  CoTaskMemFree=combase.CoTaskMemFree
+  GetTempPathW=FlutterWinRTGetTempPathW
+  GetLastError=FlutterWinRTGetLastError
+  GetModuleFileNameW=FlutterWinRTGetModuleFileNameW
+  GetWindowRect=MinUser.GetWindowRect
+  GetClientRect=MinUser.GetClientRect
+  IsWindowVisible=MinUser.IsWindowVisible
+  GetWindowLongPtrW=MinUser.GetWindowLongPtrW
+  SetWindowLongPtrW=MinUser.SetWindowLongPtrW
+  CallWindowProcW=MinUser.CallWindowProcW
+  SendMessageW=MinUser.SendMessageW
+  IsZoomed=FlutterWinRTIsZoomed
+  GetSystemMetrics=MinUser.GetSystemMetrics
+  MonitorFromWindow=MinUser.MonitorFromWindow
+  GetMonitorInfoW=MinUser.GetMonitorInfoW
+  PostMessageW=MinUser.PostMessageW
+  SetWindowPos=MinUser.SetWindowPos
+  SetWindowTextW=MinUser.SetWindowTextW

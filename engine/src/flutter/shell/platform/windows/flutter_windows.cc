@@ -95,6 +95,7 @@ static FlutterDesktopViewControllerRef CreateViewController(
   std::unique_ptr<flutter::FlutterWindowsView> view =
       engine_ptr->CreateView(std::move(window_wrapper));
   if (!view) {
+    FML_LOG(ERROR) << "FlutterDesktopViewControllerCreate failed: CreateView returned null.";
     return nullptr;
   }
 
@@ -104,6 +105,7 @@ static FlutterDesktopViewControllerRef CreateViewController(
   // Launch the engine if it is not running already.
   if (!controller->engine()->running()) {
     if (!controller->engine()->Run()) {
+      FML_LOG(ERROR) << "FlutterDesktopViewControllerCreate failed: engine Run returned false.";
       return nullptr;
     }
   }

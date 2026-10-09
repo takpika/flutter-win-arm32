@@ -727,15 +727,23 @@ bool DartIsolate::PrepareForRunningFromPrecompiledCode() {
 
 bool DartIsolate::LoadKernel(const std::shared_ptr<const fml::Mapping>& mapping,
                              bool last_piece) {
-  if (!Dart_IsKernel(mapping->GetMapping(), mapping->GetSize())) {
+  const uint8_t* buffer = mapping->GetMapping();
+  const intptr_t buffer_size = mapping->GetSize();
+#if defined(_WIN32) && (defined(_M_ARM) || defined(__arm__))
+  const bool is_bytecode = Dart_IsBytecode(buffer, buffer_size);
+#else
+  const bool is_bytecode = false;
+#endif
+  if (!is_bytecode && !Dart_IsKernel(buffer, buffer_size)) {
     return false;
   }
 
   // Mapping must be retained until isolate group shutdown.
   GetIsolateGroupData().AddKernelBuffer(mapping);
 
-  Dart_Handle library =
-      Dart_LoadLibraryFromKernel(mapping->GetMapping(), mapping->GetSize());
+  Dart_Handle library = is_bytecode
+                            ? Dart_LoadScriptFromBytecode(buffer, buffer_size)
+                            : Dart_LoadLibraryFromKernel(buffer, buffer_size);
   if (tonic::CheckAndHandleError(library)) {
     return false;
   }

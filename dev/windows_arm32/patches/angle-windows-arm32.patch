@@ -1,0 +1,599 @@
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -292,8 +292,9 @@
+     cflags += [ "-w" ]
+   }
+ 
+-  # Enable more default warnings on Windows.
+-  if (is_win) {
++  # MSVC diagnostic numbers do not match the Phone GNU-mode compiler.
++  # Phone uses the Clang warning groups below.
++  if (is_win && !flutter_windows_phone) {
+     cflags += [
+       "/we4244",  # Conversion: possible loss of data.
+       "/we4312",  # Conversion: greater size.
+@@ -356,7 +357,13 @@
+   ldflags = [ "-Wl,--build-id" ]
+ }
+ 
+-_use_copy_compiler_dll = angle_has_build && is_win
++declare_args() {
++  # Let standalone distributions use the compiler installed by the OS.
++  # Copying an SDK system DLL is inappropriate for those distributions.
++  angle_copy_d3dcompiler_dll = true
++}
++_use_copy_compiler_dll = angle_has_build && is_win && !flutter_windows_phone &&
++                         angle_copy_d3dcompiler_dll
+ 
+ if (_use_copy_compiler_dll) {
+   copy("copy_compiler_dll") {
+@@ -372,7 +379,12 @@
+ 
+ config("angle_uwp_env") {
+   if (angle_is_winuwp) {
+-    defines = [ "WINAPI_FAMILY=WINAPI_FAMILY_PC_APP" ]
++    if (flutter_windows_phone) {
++      # The Phone toolchain already supplies WINAPI_FAMILY_APP.
++      defines = []
++    } else {
++      defines = [ "WINAPI_FAMILY=WINAPI_FAMILY_PC_APP" ]
++    }
+   }
+ }
+ 
+--- a/gni/angle.gni
++++ b/gni/angle.gni
+@@ -167,6 +167,8 @@
+ 
+   angle_enable_d3d9 = is_win && !angle_is_winuwp
+   angle_enable_d3d11 = is_win
++  # Opt in to legacy hardware below feature level 9_3 without selecting UWP.
++  angle_enable_d3d11_low_feature_levels = false
+   angle_enable_gl =
+       (ozone_platform_gbm || ozone_platform_wayland || !is_linux ||
+        ((angle_use_x11 && !is_chromeos) || angle_use_wayland || is_castos)) &&
+--- a/src/common/tls.cpp
++++ b/src/common/tls.cpp
+@@ -16,13 +16,15 @@
+ #    include <set>
+ #    include <vector>
+ 
++#    if !defined(FLUTTER_WINDOWS_PHONE)
+ #    include <Windows.System.Threading.h>
+ #    include <wrl/async.h>
+ #    include <wrl/client.h>
+ 
+-using namespace std;
+ using namespace Windows::Foundation;
+ using namespace ABI::Windows::System::Threading;
++#    endif
++using namespace std;
+ 
+ // Thread local storage for Windows Store support
+ typedef vector<void *> ThreadLocalData;
+--- a/src/common/utilities.cpp
++++ b/src/common/utilities.cpp
+@@ -16,7 +16,9 @@
+ 
+ #if defined(ANGLE_ENABLE_WINDOWS_UWP)
+ #    include <windows.applicationmodel.core.h>
++#    if !defined(FLUTTER_WINDOWS_PHONE)
+ #    include <windows.graphics.display.h>
++#    endif
+ #    include <wrl.h>
+ #    include <wrl/wrappers/corewrappers.h>
+ #endif
+--- a/src/libANGLE/renderer/d3d/BUILD.gn
++++ b/src/libANGLE/renderer/d3d/BUILD.gn
+@@ -44,6 +44,9 @@
+ if (angle_enable_d3d11) {
+   config("angle_d3d11_backend_config") {
+     defines = [ "ANGLE_ENABLE_D3D11" ]
++    if (angle_enable_d3d11_low_feature_levels) {
++      defines += [ "ANGLE_ENABLE_D3D11_LOW_FEATURE_LEVELS" ]
++    }
+     if (angle_enable_d3d11_compositor_native_window) {
+       defines += [ "ANGLE_ENABLE_D3D11_COMPOSITOR_NATIVE_WINDOW" ]
+     }
+@@ -59,7 +62,11 @@
+   }
+ 
+   config("angle_enable_winuwp_config") {
+-    defines = [ "ANGLE_ENABLE_WINDOWS_UWP 1" ]
++    if (flutter_windows_phone) {
++      defines = [ "ANGLE_ENABLE_WINDOWS_UWP=1" ]
++    } else {
++      defines = [ "ANGLE_ENABLE_WINDOWS_UWP 1" ]
++    }
+   }
+ 
+   angle_source_set("angle_enable_winuwp") {
+--- a/src/libANGLE/renderer/d3d/d3d11/Renderer11.cpp
++++ b/src/libANGLE/renderer/d3d/d3d11/Renderer11.cpp
+@@ -99,6 +99,8 @@
+     ANGLE_FEATURE_LEVEL_10_1,
+     ANGLE_FEATURE_LEVEL_11_0,
+     ANGLE_FEATURE_LEVEL_11_1,
++    ANGLE_FEATURE_LEVEL_9_1,
++    ANGLE_FEATURE_LEVEL_9_2,
+     NUM_ANGLE_FEATURE_LEVELS
+ };
+ 
+@@ -106,6 +108,10 @@
+ {
+     switch (d3dFeatureLevel)
+     {
++        case D3D_FEATURE_LEVEL_9_1:
++            return ANGLE_FEATURE_LEVEL_9_1;
++        case D3D_FEATURE_LEVEL_9_2:
++            return ANGLE_FEATURE_LEVEL_9_2;
+         case D3D_FEATURE_LEVEL_9_3:
+             return ANGLE_FEATURE_LEVEL_9_3;
+         case D3D_FEATURE_LEVEL_10_0:
+@@ -487,7 +493,7 @@
+             {
+                 mAvailableFeatureLevels.push_back(D3D_FEATURE_LEVEL_9_3);
+             }
+-#if defined(ANGLE_ENABLE_WINDOWS_UWP)
++#if defined(ANGLE_ENABLE_WINDOWS_UWP) || defined(ANGLE_ENABLE_D3D11_LOW_FEATURE_LEVELS)
+             if (requestedMinorVersion == EGL_DONT_CARE || requestedMinorVersion >= 2)
+             {
+                 mAvailableFeatureLevels.push_back(D3D_FEATURE_LEVEL_9_2);
+@@ -712,10 +718,15 @@
+             return egl::EglNotInitialized() << "Inputted D3D11 device has been lost.";
+         }
+ 
+-        if (d3dDevice->GetFeatureLevel() < D3D_FEATURE_LEVEL_9_3)
++#if defined(ANGLE_ENABLE_WINDOWS_UWP) || defined(ANGLE_ENABLE_D3D11_LOW_FEATURE_LEVELS)
++        constexpr auto minimumFeatureLevel = D3D_FEATURE_LEVEL_9_1;
++#else
++        constexpr auto minimumFeatureLevel = D3D_FEATURE_LEVEL_9_3;
++#endif
++        if (d3dDevice->GetFeatureLevel() < minimumFeatureLevel)
+         {
+             return egl::EglNotInitialized()
+-                   << "Inputted D3D11 device must be Feature Level 9_3 or greater.";
++                   << "Inputted D3D11 device is below the supported feature level.";
+         }
+ 
+         // The Renderer11 adds a ref to the inputted D3D11 device, like D3D11CreateDevice does.
+@@ -2528,6 +2539,8 @@
+             return D3D10_1_SHADER_MAJOR_VERSION;  // 4
+         case D3D_FEATURE_LEVEL_10_0:
+             return D3D10_SHADER_MAJOR_VERSION;  // 4
++        case D3D_FEATURE_LEVEL_9_1:
++        case D3D_FEATURE_LEVEL_9_2:
+         case D3D_FEATURE_LEVEL_9_3:
+             return D3D10_SHADER_MAJOR_VERSION;  // 4
+         default:
+@@ -2547,6 +2560,8 @@
+             return D3D10_1_SHADER_MINOR_VERSION;  // 1
+         case D3D_FEATURE_LEVEL_10_0:
+             return D3D10_SHADER_MINOR_VERSION;  // 0
++        case D3D_FEATURE_LEVEL_9_1:
++        case D3D_FEATURE_LEVEL_9_2:
+         case D3D_FEATURE_LEVEL_9_3:
+             return D3D10_SHADER_MINOR_VERSION;  // 0
+         default:
+@@ -2566,6 +2581,9 @@
+             return "";
+         case D3D_FEATURE_LEVEL_10_0:
+             return "";
++        case D3D_FEATURE_LEVEL_9_1:
++        case D3D_FEATURE_LEVEL_9_2:
++            return "_level_9_1";
+         case D3D_FEATURE_LEVEL_9_3:
+             return "_level_9_3";
+         default:
+--- a/src/libANGLE/renderer/d3d/d3d11/Trim11.cpp
++++ b/src/libANGLE/renderer/d3d/d3d11/Trim11.cpp
+@@ -24,9 +24,48 @@
+ 
+ namespace rx
+ {
++#if defined(FLUTTER_WINDOWS_PHONE)
++namespace {
++template <class Function>
++class PhoneSuspendHandler final : public IEventHandler<SuspendingEventArgs *> {
++  public:
++    explicit PhoneSuspendHandler(Function function) : mFunction(std::move(function)) {}
++    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id, void **out) override {
++        if (!out) return E_POINTER;
++        *out = nullptr;
++        if (id != IID_IUnknown && id != __uuidof(IEventHandler<SuspendingEventArgs *>)) return E_NOINTERFACE;
++        *out = static_cast<IEventHandler<SuspendingEventArgs *> *>(this);
++        AddRef();
++        return S_OK;
++    }
++    ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&mReferences); }
++    ULONG STDMETHODCALLTYPE Release() override {
++        ULONG references = InterlockedDecrement(&mReferences);
++        if (!references) delete this;
++        return references;
++    }
++    HRESULT STDMETHODCALLTYPE Invoke(IInspectable *sender, ISuspendingEventArgs *args) override {
++        return mFunction(sender, args);
++    }
++  private:
++    volatile LONG mReferences = 1;
++    Function mFunction;
++};
++template <class Function>
++ComPtr<IEventHandler<SuspendingEventArgs *>> phoneSuspendHandler(Function function) {
++    ComPtr<IEventHandler<SuspendingEventArgs *>> handler;
++    handler.Attach(new PhoneSuspendHandler<Function>(std::move(function)));
++    return handler;
++}
++}  // namespace
++#endif
++
+ 
+ Trim11::Trim11(rx::Renderer11 *renderer) : mRenderer(renderer)
+ {
++#if defined(ANGLE_ENABLE_WINDOWS_UWP)
++    mApplicationSuspendedEventToken.value = 0;
++#endif
+     bool result = true;
+     result      = registerForRendererTrimRequest();
+     ASSERT(result);
+@@ -59,12 +98,26 @@
+ {
+ #if defined(ANGLE_ENABLE_WINDOWS_UWP)
+     ICoreApplication *coreApplication = nullptr;
+-    HRESULT result                    = GetActivationFactory(
++    HRESULT result                    =
++#if defined(FLUTTER_WINDOWS_PHONE)
++        RoGetActivationFactory(
++#else
++        GetActivationFactory(
++#endif
+         HStringReference(RuntimeClass_Windows_ApplicationModel_Core_CoreApplication).Get(),
++#if defined(FLUTTER_WINDOWS_PHONE)
++        IID_PPV_ARGS(&coreApplication));
++#else
+         &coreApplication);
++#endif
+     if (SUCCEEDED(result))
+     {
+-        auto suspendHandler = Callback<IEventHandler<SuspendingEventArgs *>>(
++        auto suspendHandler =
++#if defined(FLUTTER_WINDOWS_PHONE)
++            phoneSuspendHandler(
++#else
++            Callback<IEventHandler<SuspendingEventArgs *>>(
++#endif
+             [this](IInspectable *, ISuspendingEventArgs *) -> HRESULT {
+                 trim();
+                 return S_OK;
+@@ -88,9 +141,18 @@
+     if (mApplicationSuspendedEventToken.value != 0)
+     {
+         ICoreApplication *coreApplication = nullptr;
+-        if (SUCCEEDED(GetActivationFactory(
++        if (SUCCEEDED(
++#if defined(FLUTTER_WINDOWS_PHONE)
++                RoGetActivationFactory(
++#else
++                GetActivationFactory(
++#endif
+                 HStringReference(RuntimeClass_Windows_ApplicationModel_Core_CoreApplication).Get(),
++#if defined(FLUTTER_WINDOWS_PHONE)
++                IID_PPV_ARGS(&coreApplication))))
++#else
+                 &coreApplication)))
++#endif
+         {
+             coreApplication->remove_Suspending(mApplicationSuspendedEventToken);
+         }
+--- a/src/libANGLE/renderer/d3d/d3d11/winrt/CoreWindowNativeWindow.cpp
++++ b/src/libANGLE/renderer/d3d/d3d11/winrt/CoreWindowNativeWindow.cpp
+@@ -8,7 +8,11 @@
+ 
+ #include "libANGLE/renderer/d3d/d3d11/winrt/CoreWindowNativeWindow.h"
+ 
++#if defined(FLUTTER_WINDOWS_PHONE)
++#include "libANGLE/renderer/d3d/d3d11/winrt/PhoneDisplayInformation.h"
++#else
+ #include <windows.graphics.display.h>
++#endif
+ 
+ using namespace ABI::Windows::Foundation::Collections;
+ 
+@@ -115,8 +119,15 @@
+ bool CoreWindowNativeWindow::registerForSizeChangeEvents()
+ {
+     ComPtr<IWindowSizeChangedEventHandler> sizeChangedHandler;
++#if defined(FLUTTER_WINDOWS_PHONE)
++    ComPtr<CoreWindowSizeChangedHandler> handler;
++    handler.Attach(new CoreWindowSizeChangedHandler());
++    HRESULT result = handler->RuntimeClassInitialize(this->shared_from_this());
++    if (SUCCEEDED(result)) result = handler.As(&sizeChangedHandler);
++#else
+     HRESULT result = Microsoft::WRL::MakeAndInitialize<CoreWindowSizeChangedHandler>(
+         sizeChangedHandler.ReleaseAndGetAddressOf(), this->shared_from_this());
++#endif
+     if (SUCCEEDED(result))
+     {
+         result = mCoreWindow->add_SizeChanged(sizeChangedHandler.Get(), &mSizeChangedEventToken);
+@@ -164,7 +175,13 @@
+         DXGI_USAGE_SHADER_INPUT | DXGI_USAGE_RENDER_TARGET_OUTPUT | DXGI_USAGE_BACK_BUFFER;
+     swapChainDesc.BufferCount = 2;
+     swapChainDesc.SwapEffect  = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
++#if defined(FLUTTER_WINDOWS_PHONE)
++    // Mobile's CoreWindow bounds include system chrome. Stretching the
++    // swapchain into its host region distorts rendering and input coordinates.
++    swapChainDesc.Scaling     = DXGI_SCALING_NONE;
++#else
+     swapChainDesc.Scaling     = DXGI_SCALING_STRETCH;
++#endif
+     swapChainDesc.AlphaMode   = DXGI_ALPHA_MODE_UNSPECIFIED;
+ 
+     *swapChain = nullptr;
+@@ -213,6 +230,17 @@
+ 
+ static float GetLogicalDpi()
+ {
++#if defined(FLUTTER_WINDOWS_PHONE)
++    ComPtr<PhoneDisplayInformationStatics> statics;
++    HRESULT result = RoGetActivationFactory(
++        HStringReference(L"Windows.Graphics.Display.DisplayInformation").Get(),
++        IID_PPV_ARGS(&statics));
++    ComPtr<PhoneDisplayInformation> display;
++    float dpi = 96.0f;
++    if (SUCCEEDED(result) && SUCCEEDED(statics->GetForCurrentView(&display)) &&
++        SUCCEEDED(display->get_LogicalDpi(&dpi)) && dpi > 0.0f) return dpi;
++    return 96.0f;
++#else
+     ComPtr<ABI::Windows::Graphics::Display::IDisplayPropertiesStatics> displayProperties;
+ 
+     if (SUCCEEDED(GetActivationFactory(
+@@ -228,6 +256,7 @@
+ 
+     // Return 96 dpi as a default if display properties cannot be obtained.
+     return 96.0f;
++#endif
+ }
+ 
+ float ConvertDipsToPixels(float dips)
+--- a/src/libANGLE/renderer/d3d/d3d11/winrt/CoreWindowNativeWindow.h
++++ b/src/libANGLE/renderer/d3d/d3d11/winrt/CoreWindowNativeWindow.h
+@@ -15,9 +15,15 @@
+ 
+ #include <EGL/eglplatform.h>
+ 
++#if defined(FLUTTER_WINDOWS_PHONE)
++using IWindowSizeChangedEventHandler = ABI::Windows::Foundation::ITypedEventHandler<
++    ABI::Windows::UI::Core::CoreWindow *, ABI::Windows::UI::Core::WindowSizeChangedEventArgs *>;
++#else
+ typedef ABI::Windows::Foundation::
+     __FITypedEventHandler_2_Windows__CUI__CCore__CCoreWindow_Windows__CUI__CCore__CWindowSizeChangedEventArgs_t
+         IWindowSizeChangedEventHandler;
++
++#endif
+ 
+ namespace rx
+ {
+@@ -50,12 +56,32 @@
+ };
+ 
+ __declspec(uuid("7F924F66-EBAE-40E5-A10B-B8F35E245190")) class CoreWindowSizeChangedHandler
++#if defined(FLUTTER_WINDOWS_PHONE)
++    : public IWindowSizeChangedEventHandler
++#else
+     : public Microsoft::WRL::RuntimeClass<
+           Microsoft::WRL::RuntimeClassFlags<Microsoft::WRL::ClassicCom>,
+           IWindowSizeChangedEventHandler>
++#endif
+ {
+   public:
+     CoreWindowSizeChangedHandler() {}
++#if defined(FLUTTER_WINDOWS_PHONE)
++    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id, void **out) override {
++        if (!out) return E_POINTER;
++        *out = nullptr;
++        if (id != IID_IUnknown && id != __uuidof(IWindowSizeChangedEventHandler)) return E_NOINTERFACE;
++        *out = static_cast<IWindowSizeChangedEventHandler *>(this);
++        AddRef();
++        return S_OK;
++    }
++    ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&mReferences); }
++    ULONG STDMETHODCALLTYPE Release() override {
++        ULONG count = InterlockedDecrement(&mReferences);
++        if (!count) delete this;
++        return count;
++    }
++#endif
+     HRESULT RuntimeClassInitialize(std::shared_ptr<InspectableNativeWindow> host)
+     {
+         if (!host)
+@@ -88,6 +114,9 @@
+     }
+ 
+   private:
++#if defined(FLUTTER_WINDOWS_PHONE)
++    volatile LONG mReferences = 1;
++#endif
+     std::weak_ptr<InspectableNativeWindow> mHost;
+ };
+ 
+--- /dev/null
++++ b/src/libANGLE/renderer/d3d/d3d11/winrt/PhoneDisplayInformation.h
+@@ -0,0 +1,24 @@
++// ABI prefixes used for DPI on Windows 10 Mobile. IID and method order are
++// from Microsoft SDK windows.graphics.display.h, UniversalApiContract v1.0.
++// These are interface declarations only; the OS supplies their implementation.
++#pragma once
++#include <inspectable.h>
++#include <eventtoken.h>
++namespace rx {
++struct __declspec(uuid("bed112ae-adc3-4dc9-ae65-851f4d7d4799")) PhoneDisplayInformation : IInspectable {
++    virtual HRESULT STDMETHODCALLTYPE get_CurrentOrientation(INT *value) = 0;
++    virtual HRESULT STDMETHODCALLTYPE get_NativeOrientation(INT *value) = 0;
++    virtual HRESULT STDMETHODCALLTYPE add_OrientationChanged(IUnknown *handler, EventRegistrationToken *token) = 0;
++    virtual HRESULT STDMETHODCALLTYPE remove_OrientationChanged(EventRegistrationToken token) = 0;
++    virtual HRESULT STDMETHODCALLTYPE get_ResolutionScale(INT *value) = 0;
++    virtual HRESULT STDMETHODCALLTYPE get_LogicalDpi(FLOAT *value) = 0;
++};
++struct __declspec(uuid("c6a02a6c-d452-44dc-ba07-96f3c6adf9d1")) PhoneDisplayInformationStatics : IInspectable {
++    virtual HRESULT STDMETHODCALLTYPE GetForCurrentView(PhoneDisplayInformation **value) = 0;
++};
++}  // namespace rx
++
++__CRT_UUID_DECL(rx::PhoneDisplayInformation, 0xbed112ae, 0xadc3, 0x4dc9,
++                0xae, 0x65, 0x85, 0x1f, 0x4d, 0x7d, 0x47, 0x99)
++__CRT_UUID_DECL(rx::PhoneDisplayInformationStatics, 0xc6a02a6c, 0xd452, 0x44dc,
++                0xba, 0x07, 0x96, 0xf3, 0xc6, 0xad, 0xf9, 0xd1)
+--- a/src/libGLESv2.gni
++++ b/src/libGLESv2.gni
+@@ -137,7 +137,7 @@
+ 
+ if (is_win) {
+   libangle_common_sources += [ "src/common/system_utils_win.cpp" ]
+-  if (target_os == "winuwp") {
++  if (target_os == "winuwp" || flutter_windows_phone) {
+     libangle_common_sources += [ "src/common/system_utils_winuwp.cpp" ]
+   } else {
+     libangle_common_sources += [ "src/common/system_utils_win32.cpp" ]
+diff --git a/src/libANGLE/renderer/d3d/d3d11/converged/CompositorNativeWindow11.cpp b/src/libANGLE/renderer/d3d/d3d11/converged/CompositorNativeWindow11.cpp
+index 0e64f78..da65ac2 100644
+--- a/src/libANGLE/renderer/d3d/d3d11/converged/CompositorNativeWindow11.cpp
++++ b/src/libANGLE/renderer/d3d/d3d11/converged/CompositorNativeWindow11.cpp
+@@ -248,7 +248,19 @@ RoHelper::RoHelper()
+     mFpWindowsDeleteString             = &::WindowsDeleteString;
+     mFpGetActivationFactory            = &::RoGetActivationFactory;
+     mFpWindowsCompareStringOrdinal     = &::WindowsCompareStringOrdinal;
++#if defined(FLUTTER_WINDOWS_PHONE)
++    // Mobile can provide CoreWindow without the desktop dispatcher-queue export.
++    // Resolve this optional composition API only when the OS provides it.
++    mCoreMessagingModule = LoadLibraryExW(L"coremessaging.dll", nullptr,
++                                         LOAD_LIBRARY_SEARCH_SYSTEM32);
++    if (mCoreMessagingModule != nullptr)
++    {
++        AssignProcAddress(mCoreMessagingModule, "CreateDispatcherQueueController",
++                          mFpCreateDispatcherQueueController);
++    }
++#else
+     mFpCreateDispatcherQueueController = &::CreateDispatcherQueueController;
++#endif
+     mWinRtAvailable                    = true;
+ #else
+ 
+@@ -320,6 +332,12 @@ RoHelper::RoHelper()
+ 
+ RoHelper::~RoHelper()
+ {
++#if defined(FLUTTER_WINDOWS_PHONE)
++    if (mCoreMessagingModule != nullptr)
++    {
++        FreeLibrary(mCoreMessagingModule);
++    }
++#endif
+ #ifndef ANGLE_ENABLE_WINDOWS_UWP
+     if (mWinRtInitialized)
+     {
+@@ -432,6 +450,12 @@ HRESULT RoHelper::CreateDispatcherQueueController(
+     {
+         return E_FAIL;
+     }
++#if defined(FLUTTER_WINDOWS_PHONE)
++    if (mFpCreateDispatcherQueueController == nullptr)
++    {
++        return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
++    }
++#endif
+     return mFpCreateDispatcherQueueController(options, dispatcherQueueController);
+ }
+ 
+--- a/src/compiler/translator/SymbolTable.h
++++ b/src/compiler/translator/SymbolTable.h
+@@ -140,7 +140,7 @@
+       mIsVar(0u),
+       mVersion(static_cast<uint16_t>(version)),
+       mShaders(static_cast<uint8_t>(shaders)),
+-      mExtensionIndex(extensionIndex),
++      mExtensionIndex(static_cast<uint8_t>(extensionIndex)),
+       mSymbolOrVar(symbol)
+ {}
+ 
+@@ -153,7 +153,7 @@
+       mIsVar(1u),
+       mVersion(static_cast<uint16_t>(version)),
+       mShaders(static_cast<uint8_t>(shaders)),
+-      mExtensionIndex(extensionIndex),
++      mExtensionIndex(static_cast<uint8_t>(extensionIndex)),
+       mSymbolOrVar(resourceVar)
+ {}
+ 
+--- a/src/libANGLE/angletypes.cpp
++++ b/src/libANGLE/angletypes.cpp
+@@ -376,7 +376,7 @@
+                                                ColorMaskStorage::GetMask(drawBufferCount))),
+       mColorMask(mAllColorMask),
+       mAllEnabledMask(0xFF >> (8 - drawBufferCount)),
+-      mDrawBufferCount(drawBufferCount)
++      mDrawBufferCount(static_cast<uint8_t>(drawBufferCount))
+ {}
+ 
+ BlendStateExt::BlendStateExt(const BlendStateExt &other) = default;
+@@ -400,7 +400,7 @@
+                                                                           const bool alpha) const
+ {
+     return BlendStateExt::ColorMaskStorage::GetReplicatedValue(
+-        PackColorMask(red, green, blue, alpha), mAllColorMask);
++        static_cast<uint8_t>(PackColorMask(red, green, blue, alpha)), mAllColorMask);
+ }
+ 
+ BlendStateExt::ColorMaskStorage::Type BlendStateExt::expandColorMaskIndexed(
+@@ -432,7 +432,7 @@
+                                         const bool alpha)
+ {
+     ASSERT(index < mDrawBufferCount);
+-    ColorMaskStorage::SetValueIndexed(index, PackColorMask(red, green, blue, alpha), &mColorMask);
++    ColorMaskStorage::SetValueIndexed(index, static_cast<uint8_t>(PackColorMask(red, green, blue, alpha)), &mColorMask);
+ }
+ 
+ uint8_t BlendStateExt::getColorMaskIndexed(const size_t index) const
+--- a/src/libANGLE/renderer/vulkan/FramebufferVk.cpp
++++ b/src/libANGLE/renderer/vulkan/FramebufferVk.cpp
+@@ -3117,7 +3117,7 @@
+ void FramebufferVk::updateActiveColorMasks(size_t colorIndexGL, bool r, bool g, bool b, bool a)
+ {
+     gl::BlendStateExt::ColorMaskStorage::SetValueIndexed(
+-        colorIndexGL, gl::BlendStateExt::PackColorMask(r, g, b, a),
++        colorIndexGL, static_cast<uint8_t>(gl::BlendStateExt::PackColorMask(r, g, b, a)),
+         &mActiveColorComponentMasksForClear);
+ }
+ 
+--- a/src/libANGLE/renderer/vulkan/RendererVk.cpp
++++ b/src/libANGLE/renderer/vulkan/RendererVk.cpp
+@@ -1061,7 +1061,7 @@
+ 
+         // Create unique hash key.
+         egl::BlobCache::Key chunkCacheHash;
+-        ComputePipelineCacheVkChunkKey(physicalDeviceProperties, chunkIndex, &chunkCacheHash);
++        ComputePipelineCacheVkChunkKey(physicalDeviceProperties, static_cast<uint8_t>(chunkIndex), &chunkCacheHash);
+ 
+         displayVk->getBlobCache()->putApplication(chunkCacheHash, keyData);
+     }
+@@ -1184,7 +1184,7 @@
+     for (size_t chunkIndex = 0; chunkIndex < numChunks; ++chunkIndex)
+     {
+         // Get the unique key by chunkIndex.
+-        ComputePipelineCacheVkChunkKey(physicalDeviceProperties, chunkIndex, &chunkCacheHash);
++        ComputePipelineCacheVkChunkKey(physicalDeviceProperties, static_cast<uint8_t>(chunkIndex), &chunkCacheHash);
+ 
+         if (!displayVk->getBlobCache()->get(displayVk->getScratchBuffer(), chunkCacheHash, &keyData,
+                                             &keySize) ||
+diff --git a/src/libANGLE/renderer/d3d/d3d11/formatutils11.cpp b/src/libANGLE/renderer/d3d/d3d11/formatutils11.cpp
+index 3e575d3..6d30a1f 100644
+--- a/src/libANGLE/renderer/d3d/d3d11/formatutils11.cpp
++++ b/src/libANGLE/renderer/d3d/d3d11/formatutils11.cpp
+@@ -467,7 +467,7 @@ const VertexFormat *GetVertexFormatInfo_FL_9_3(angle::FormatID vertexFormatID)
+ const VertexFormat &GetVertexFormatInfo(angle::FormatID vertexFormatID,
+                                         D3D_FEATURE_LEVEL featureLevel)
+ {
+-    if (featureLevel == D3D_FEATURE_LEVEL_9_3)
++    if (featureLevel <= D3D_FEATURE_LEVEL_9_3)
+     {
+         const VertexFormat *result = GetVertexFormatInfo_FL_9_3(vertexFormatID);
+         if (result)

@@ -6,11 +6,12 @@
 
 #include <dwmapi.h>
 
+#include <cstring>
 #include <filesystem>
 #include <shared_mutex>
-#include <sstream>
 
 #include "flutter/fml/logging.h"
+#include "flutter/fml/message_loop.h"
 #include "flutter/fml/paths.h"
 #include "flutter/fml/platform/win/wstring_conversion.h"
 #include "flutter/fml/synchronization/waitable_event.h"
@@ -196,9 +197,14 @@ FlutterWindowsEngine::FlutterWindowsEngine(
   auto& switches = project_->GetSwitches();
   enable_impeller_ = std::find(switches.begin(), switches.end(),
                                "--enable-impeller=true") != switches.end();
+  const bool enable_software_rendering =
+      std::find(switches.begin(), switches.end(),
+                "--enable-software-rendering") != switches.end();
 
-  egl_manager_ = egl::Manager::Create(
-      static_cast<egl::GpuPreference>(project_->gpu_preference()));
+  if (!enable_software_rendering) {
+    egl_manager_ = egl::Manager::Create(
+        static_cast<egl::GpuPreference>(project_->gpu_preference()));
+  }
   window_proc_delegate_manager_ = std::make_unique<WindowProcDelegateManager>();
 
   display_manager_ = std::make_shared<DisplayManagerWin32>(this);
@@ -270,6 +276,9 @@ bool FlutterWindowsEngine::Run() {
 }
 
 bool FlutterWindowsEngine::Run(std::string_view entrypoint) {
+#if defined(_M_ARM) || defined(__arm__)
+  SetErrorMode(GetErrorMode() | SEM_NOALIGNMENTFAULTEXCEPT);
+#endif
   if (!project_->HasValidPaths()) {
     FML_LOG(ERROR) << "Missing or unresolvable paths to assets.";
     return false;
@@ -322,8 +331,15 @@ bool FlutterWindowsEngine::Run(std::string_view entrypoint) {
   custom_task_runners.thread_priority_setter =
       &WindowsPlatformThreadPrioritySetter;
 
-  if (project_->ui_thread_policy() !=
-      FlutterUIThreadPolicy::RunOnSeparateThread) {
+  auto ui_thread_policy = project_->ui_thread_policy();
+#if defined(_M_ARM) || defined(__arm__)
+  // Retain the separate-thread default on Windows RT. Explicit thread policies
+  // still select the requested runner, as on the other Windows architectures.
+  if (ui_thread_policy == FlutterUIThreadPolicy::Default) {
+    ui_thread_policy = FlutterUIThreadPolicy::RunOnSeparateThread;
+  }
+#endif
+  if (ui_thread_policy != FlutterUIThreadPolicy::RunOnSeparateThread) {
     custom_task_runners.ui_task_runner = &platform_task_runner;
   } else {
     FML_LOG(WARNING) << "Running with unmerged platform and UI threads. This "
@@ -337,6 +353,7 @@ bool FlutterWindowsEngine::Run(std::string_view entrypoint) {
   args.icu_data_path = icu_path_string.c_str();
   args.command_line_argc = static_cast<int>(argv.size());
   args.command_line_argv = argv.empty() ? nullptr : argv.data();
+  args.dart_old_gen_heap_size = -1;
   args.engine_id = reinterpret_cast<int64_t>(this);
 
   // Fail if conflicting non-default entrypoints are specified in the method
@@ -490,6 +507,9 @@ bool FlutterWindowsEngine::Run(std::string_view entrypoint) {
         egl_manager_ ? GetOpenGLRendererConfig() : GetSoftwareRendererConfig();
   }
 
+#if defined(_M_ARM) || defined(__arm__)
+  fml::MessageLoop::EnsureInitializedForCurrentThread();
+#endif
   auto result = embedder_api_.Run(FLUTTER_ENGINE_VERSION, &renderer_config,
                                   &args, this, &engine_);
   if (result != kSuccess || engine_ == nullptr) {

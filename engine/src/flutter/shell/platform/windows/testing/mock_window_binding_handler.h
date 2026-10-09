@@ -28,7 +28,10 @@ class MockWindowBindingHandler : public WindowBindingHandler {
   MOCK_METHOD(bool, OnBitmapSurfaceCleared, (), (override));
   MOCK_METHOD(bool,
               OnBitmapSurfaceUpdated,
-              (const void* allocation, size_t row_bytes, size_t height),
+              (const void* allocation,
+               size_t row_bytes,
+               size_t height,
+               bool top_down),
               (override));
   MOCK_METHOD(PointerLocation, GetPrimaryPointerLocation, (), (override));
   MOCK_METHOD(AlertPlatformNodeDelegate*, GetAlertDelegate, (), (override));

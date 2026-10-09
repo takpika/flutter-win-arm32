@@ -1,0 +1,98 @@
+{
+  "upstreamRevision": "e28922c5e71eb32594c2562076cd5b15383e24d4",
+  "files": [
+    {
+      "path": "BUILD.gn",
+      "originalSha256": "f56c219e89b24bfca3aac40eeaf88a8932e7b60ff4200648ad147b4a41b2378f",
+      "patchedSha256": "53146da843b726dc1efbb846885f57afb49c0c11e3b12f53f81d6f8c2dad0520"
+    },
+    {
+      "path": "gni/angle.gni",
+      "originalSha256": "237ad2fc957077a4730e0bc5179f1492d8d3893012ab07dce4a338da864d72ce",
+      "patchedSha256": "bba8a4ceedc18ccfee0a23a7bb65e603dbe2f0281271a9fc57581ab829039d22"
+    },
+    {
+      "path": "src/common/tls.cpp",
+      "originalSha256": "5d36be101bbea5d362cc1e9a3214ac944f45a8300a69a3bce0cf5a29e3dbe4a1",
+      "patchedSha256": "0f26ab09458b514f09b36ec41e55e7d02c3009c762dadc2cf8cbe8229aa9b084"
+    },
+    {
+      "path": "src/common/utilities.cpp",
+      "originalSha256": "8d019efb948914e24b85ffcdd8515301b71dceda2a26cadc17faa9ac6158f6c6",
+      "patchedSha256": "d748bbde7068d6dceb3c415960dc24c1deaeadcf1c63294c88ecd742c53a86be"
+    },
+    {
+      "path": "src/libANGLE/renderer/d3d/BUILD.gn",
+      "originalSha256": "d2f527305a944b4aa8c92f165072dc1829a655e9818fdcfcc1a2c88395487334",
+      "patchedSha256": "2210c4f88bb1216c8d4ea67e96a5d488063395141b1c7e070782ee02557a49b7"
+    },
+    {
+      "path": "src/libANGLE/renderer/d3d/d3d11/Renderer11.cpp",
+      "originalSha256": "c0763385a86b84122f29dda2dc9d1c8a9b3eb98d94838ee39942c2a03dd74eb9",
+      "patchedSha256": "8e1037824c75029a819a975da52803dad9eca66c8b1b1bd01e18bae38ec53429"
+    },
+    {
+      "path": "src/libANGLE/renderer/d3d/d3d11/Trim11.cpp",
+      "originalSha256": "7249e221764e7bc0c63bc12764ecdd5c87e0c4ce12638cef540865cdbefd3ebc",
+      "patchedSha256": "751711b09d22c9f1d4725bc7402fa9dcc78fc6adf62c445db043cb570c51a6e6"
+    },
+    {
+      "path": "src/libANGLE/renderer/d3d/d3d11/winrt/CoreWindowNativeWindow.cpp",
+      "originalSha256": "3ff3637aee9bbcd9c6f48f10e788881b3b87c1189ac3b3bfb41235afc6002e0b",
+      "patchedSha256": "db27aec06cc14e44a13f29bed52c17b3237e71368935fac53e656bc360653df0"
+    },
+    {
+      "path": "src/libANGLE/renderer/d3d/d3d11/winrt/CoreWindowNativeWindow.h",
+      "originalSha256": "a44c7a47a8a9ba5d42a50e5e980acde651e3c15ee7a4ef55c3350fe24aed486b",
+      "patchedSha256": "77e1737f7113ac7654d62e5f7eed765ac9935a54bc3aa9d5985a7ef0245e717c"
+    },
+    {
+      "path": "src/libANGLE/renderer/d3d/d3d11/winrt/PhoneDisplayInformation.h",
+      "originalSha256": null,
+      "patchedSha256": "0accdcb2ce85bd2757f9ca88efb5eac315f0f3432784daff1487401d223a1d6b"
+    },
+    {
+      "path": "src/libGLESv2.gni",
+      "originalSha256": "c26057614b15424f3a577f477e4bad705336f00d3f05671a1c7df79ff45a0eaf",
+      "patchedSha256": "15e7b9f624080593ae56daf31ad11cbcd247072d5653c7ecd7ed28d89f27a3e1"
+    },
+    {
+      "path": "src/libANGLE/renderer/d3d/d3d11/converged/CompositorNativeWindow11.cpp",
+      "originalSha256": "9ff317a11b138d9cb89666c61bc0d2734eb509714de6a5f39a9de269c4079a85",
+      "patchedSha256": "113fbb5a04bf3ba4cee391d1c4607c0532a6934630a1a1d498ddbf78f3f0d459"
+    },
+    {
+      "path": "src/compiler/translator/SymbolTable.h",
+      "originalSha256": "f361cd05bf707fb86a3330b871d30e4037a06347ceb4739969251da22c4d2354",
+      "patchedSha256": "de07d69f90d80f9cbfd9e5119a9fc0b87572c003f90fbbb2a31537a75e5dccdb"
+    },
+    {
+      "path": "src/libANGLE/angletypes.cpp",
+      "originalSha256": "9fe794c5b4069573ea6236f74459853bc3f105f147dffa43f4cb862064d50199",
+      "patchedSha256": "e82ede17ccf74b19db9092ce3a49595e513b9ac423d75d54c3037e7962f75ad9"
+    },
+    {
+      "path": "src/libANGLE/renderer/vulkan/FramebufferVk.cpp",
+      "originalSha256": "4669342894bd2c95630a5531e2ef0aac4f4676af5e8a188c8408e44137b3a19f",
+      "patchedSha256": "5018ccddcab72efe13c30595da17dda87c3404ee05597e4837ca86efd13cee88"
+    },
+    {
+      "path": "src/libANGLE/renderer/vulkan/RendererVk.cpp",
+      "originalSha256": "a8410bdb3460d076bc0cee350912460dd6ab91b3d69c337be253f5324d8d9474",
+      "patchedSha256": "cfea5f82ac3f77cb4ff4c6ce0af971f778ecb653dceb7ac0588aef4a357878be"
+    },
+    {
+      "path": "src/libANGLE/renderer/d3d/d3d11/formatutils11.cpp",
+      "originalSha256": "fc1b3499ee8084f940a571e565fe095bc5576d2fe0c6913169f9409221deadb4",
+      "patchedSha256": "333b2f4affc46af0c5a08bfc4d15e80501f963ab8519d47968e927ee2708bd27"
+    }
+  ],
+  "sharedRtAndPhoneSources": true,
+  "swapChainPanelSourceSelectionAndDetectionPreserved": true,
+  "sdkCompatibilityIntegrationPending": false,
+  "fullPhoneBuildAfterRestorationVerified": true,
+  "phoneCoreWindowHardwareRuntimeAfterRestorationVerified": true,
+  "swapChainPanelRuntimeVerified": false,
+  "pinnedSdkHeaderPreparationAndOriginalSwapChainPanelCompilationVerified": true,
+  "patchSha256": "48aba27a5669813edc8409a24cc16459dc36a164c9ea06fd5464ef3552fc1e97"
+}

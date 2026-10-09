@@ -1,0 +1,71 @@
+name: Windows ARM32 SDK host tools
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [windows-arm32-3.38.10]
+    paths:
+      - dev/windows_arm32/sdk-hosts.json
+      - dev/windows_arm32/sdk_hosts.py
+      - dev/windows_arm32/toolchain/*windows*launcher*
+      - .github/workflows/windows-arm32-host-tools.yml
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  windows_launchers:
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    timeout-minutes: 30
+    env:
+      TMPDIR: ${{ github.workspace }}/_work/tmp
+    steps:
+      - name: Prepare Ubuntu amd64 container
+        run: |
+          test "$(uname -m)" = x86_64
+          mkdir -p "$TMPDIR"
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends curl ca-certificates python3 \
+            xz-utils wine wine64 xvfb xauth
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Prepare pinned cross compiler and official Windows Python
+        run: |
+          mkdir -p _work/tmp
+          export TMPDIR="$GITHUB_WORKSPACE/_work/tmp"
+          echo "TMPDIR=$TMPDIR" >> "$GITHUB_ENV"
+          archive=llvm-mingw-20251104-ucrt-ubuntu-22.04-x86_64.tar.xz
+          curl --fail --location --retry 3 \
+            "https://github.com/mstorsjo/llvm-mingw/releases/download/20251104/$archive" \
+            --output "_work/$archive"
+          echo "3aed6fa47be909884cb3e5634d6b7254604d7104832d6312f8435fb23d5a9bab  _work/$archive" | sha256sum --check
+          tar -xf "_work/$archive" -C _work
+          curl --fail --location --retry 3 \
+            https://www.python.org/ftp/python/3.14.6/python-3.14.6-embed-amd64.zip \
+            --output _work/python-windows.zip
+          echo 'df901e84a896ff1ee720ad03377e0c8d8c2244fda79808aeeaff6316df1cb75c  _work/python-windows.zip' | sha256sum --check
+      - name: Cross-build Windows x64 launcher from source
+        run: |
+          python3 dev/windows_arm32/toolchain/build_windows_launcher.py \
+            --compiler _work/llvm-mingw-20251104-ucrt-ubuntu-22.04-x86_64/bin/x86_64-w64-mingw32-clang \
+            --output _work/launcher/sdk-python-launcher.exe
+      - name: Verify Windows arguments, Unicode paths, streams and relocation
+        run: |
+          xvfb-run -a python3 dev/windows_arm32/toolchain/check_windows_launchers.py \
+            --launcher _work/launcher/sdk-python-launcher.exe \
+            --python-archive _work/python-windows.zip --output _work/launcher-check
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-arm32-windows-x64-launcher
+          path: |
+            _work/launcher/sdk-python-launcher.exe
+            _work/launcher/sdk-python-launcher.provenance.json
+            _work/launcher-check/verification.json
+          if-no-files-found: error

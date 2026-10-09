@@ -1,0 +1,55 @@
+{
+  "files": [
+    {
+      "path": "engine/src/BUILD.gn",
+      "originalSha256": "dce47396341b74daa91bbe61b89898921526c5d95e2b7b69cb1d16854ff19fbb",
+      "patchedSha256": "f03056bf3bf811edbc2b1bd105018c209a6a4cb49377cadafae05ce3b06113e7"
+    },
+    {
+      "path": "engine/src/build/config/BUILDCONFIG.gn",
+      "originalSha256": "58d694f766d4dea17549567f5e00e744b9ed07ead13b9de34d778086c25eeaae",
+      "patchedSha256": "742ffedf3c7278e429d88047983d50cf75afc89df5b1e8559f0adc910850d247"
+    },
+    {
+      "path": "engine/src/build/config/compiler/BUILD.gn",
+      "originalSha256": "d7827a8a5bdc20c80603d43e65e46a3e9158200802e66397ec1632ef41fb0c4c",
+      "patchedSha256": "5b668c3ad4c0db6d153870e998ea7391121f50cdbc2f68621fbcee0675826830"
+    },
+    {
+      "path": "engine/src/build/config/win/BUILD.gn",
+      "originalSha256": "8ad30942431bf397d044ab316e597be5c576b4afb7d8763627db99dc92b8cf86",
+      "patchedSha256": "538549388066c10ff039470109ea9c88e9a56c381d52ad9046239d33817004d9"
+    },
+    {
+      "path": "engine/src/build/config/win/visual_studio_version.gni",
+      "originalSha256": "49a560400ce41ccdcfa663b3a67e8f66f67b60d5c7d02f01b7d98d22ebea0df6",
+      "patchedSha256": "99ae842e6ee6966237ac1d98683160af2d5926e7db3abab20ce99085e071ba6d"
+    },
+    {
+      "path": "engine/src/build/toolchain/win/BUILD.gn",
+      "originalSha256": "5407c241bccec80b17e96fe4317474653a28eef3403ac651ced3ee7a24b8dd36",
+      "patchedSha256": "d3b4ffa53223ac3d5b788d1bd100216a47cc8cdf03afede6b4e70fe42e1c4bc8"
+    },
+    {
+      "path": "engine/src/build/toolchain/win/win_toolchain_data.gni",
+      "originalSha256": "77943369a4ac8a3d6dcbaaa91c4cc3aa6a3b7d2c95e1182e870886eb13dce9c9",
+      "patchedSha256": "9a3a0ba3a44421a91e54a6bd8736350e986adb9cc0a0c90412e52f57bd2e42e2"
+    },
+    {
+      "path": "engine/src/build/toolchain/windows_arm32/BUILD.gn",
+      "originalSha256": null,
+      "patchedSha256": "f944e36a3ffb7f2a2fb2dc6242fdb41408e086dabc3bcab546ff457341f3c013"
+    },
+    {
+      "path": "engine/src/build/toolchain/windows_arm32/coff_toolchain.gni",
+      "originalSha256": null,
+      "patchedSha256": "69b4128955a4ab4d3a25e56a498b5ca8655360889b9c18f192a9d5d4a7c066a6"
+    },
+    {
+      "path": "engine/src/build/toolchain/phone/BUILD.gn",
+      "originalSha256": null,
+      "patchedSha256": "50c10be3baf1f5651142e6faf2ac5814c751da60e1f6d2bd3624a8f1a7176694"
+    }
+  ],
+  "portabilityCleanupPending": true
+}

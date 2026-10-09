@@ -1,0 +1,31 @@
+diff --git a/absl/base/internal/low_level_alloc.cc b/absl/base/internal/low_level_alloc.cc
+index a563f7b..905e188 100644
+--- a/absl/base/internal/low_level_alloc.cc
++++ b/absl/base/internal/low_level_alloc.cc
+@@ -549,8 +549,13 @@ static void *DoAllocWithArena(size_t request, LowLevelAlloc::Arena *arena) {
+       size_t new_pages_size = RoundUp(req_rnd, arena->pagesize * 16);
+       void *new_pages;
+ #ifdef _WIN32
++#if defined(FLUTTER_WINDOWS_PHONE)
++      new_pages = VirtualAllocFromApp(nullptr, new_pages_size,
++                                      MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
++#else
+       new_pages = VirtualAlloc(nullptr, new_pages_size,
+                                MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
++#endif
+       ABSL_RAW_CHECK(new_pages != nullptr, "VirtualAlloc failed");
+ #else
+ #ifndef ABSL_LOW_LEVEL_ALLOC_ASYNC_SIGNAL_SAFE_MISSING
+diff --git a/absl/base/internal/thread_identity.h b/absl/base/internal/thread_identity.h
+index b6e917c..f04e515 100644
+--- a/absl/base/internal/thread_identity.h
++++ b/absl/base/internal/thread_identity.h
+@@ -213,7 +213,7 @@ void ClearCurrentThreadIdentity();
+ #error ABSL_THREAD_IDENTITY_MODE cannot be directly set
+ #elif defined(ABSL_FORCE_THREAD_IDENTITY_MODE)
+ #define ABSL_THREAD_IDENTITY_MODE ABSL_FORCE_THREAD_IDENTITY_MODE
+-#elif defined(_WIN32) && !defined(__MINGW32__)
++#elif defined(_WIN32) && (!defined(__MINGW32__) || defined(FLUTTER_WINDOWS_PHONE))
+ #define ABSL_THREAD_IDENTITY_MODE ABSL_THREAD_IDENTITY_MODE_USE_CPP11
+ #elif defined(__APPLE__) && defined(ABSL_HAVE_THREAD_LOCAL)
+ #define ABSL_THREAD_IDENTITY_MODE ABSL_THREAD_IDENTITY_MODE_USE_CPP11

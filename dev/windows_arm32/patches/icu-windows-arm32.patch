@@ -1,0 +1,56 @@
+diff --git a/source/common/umapfile.cpp b/source/common/umapfile.cpp
+index faa6d80..b2111fe 100644
+--- a/source/common/umapfile.cpp
++++ b/source/common/umapfile.cpp
+@@ -38,7 +38,7 @@
+ #   define NOIME
+ #   define NOMCX
+ 
+-#   if U_PLATFORM_HAS_WINUWP_API == 1
++#   if U_PLATFORM_HAS_WINUWP_API == 1 && !defined(FLUTTER_WINDOWS_PHONE)
+         // Some previous versions of the Windows 10 SDK don't expose various APIs for UWP applications
+         // to use, even though UWP apps are allowed to call and use them.  Temporarily change the
+         // WINAPI family partition below to Desktop, so that function declarations are visible for UWP.
+@@ -158,9 +158,18 @@ typedef HANDLE MemoryMap;
+             return false;
+         }
+ 
++#if defined(FLUTTER_WINDOWS_PHONE)
++        CREATEFILE2_EXTENDED_PARAMETERS parameters = {};
++        parameters.dwSize = sizeof(parameters);
++        parameters.dwFileAttributes = FILE_ATTRIBUTE_NORMAL;
++        parameters.dwFileFlags = FILE_FLAG_RANDOM_ACCESS;
++        file = CreateFile2(utf16Path, GENERIC_READ, FILE_SHARE_READ,
++                           OPEN_EXISTING, &parameters);
++#else
+         file = CreateFileW(utf16Path, GENERIC_READ, FILE_SHARE_READ, nullptr,
+             OPEN_EXISTING,
+             FILE_ATTRIBUTE_NORMAL | FILE_FLAG_RANDOM_ACCESS, nullptr);
++#endif
+ #endif
+         if (file == INVALID_HANDLE_VALUE) {
+             // If we failed to open the file due to an out-of-memory error, then we want
+@@ -174,7 +183,11 @@ typedef HANDLE MemoryMap;
+         // Note: We use nullptr/nullptr for lpAttributes parameter below.
+         // This means our handle cannot be inherited and we will get the default security descriptor.
+         /* create an unnamed Windows file-mapping object for the specified file */
++#if defined(FLUTTER_WINDOWS_PHONE)
++        map = CreateFileMappingFromApp(file, nullptr, PAGE_READONLY, 0, nullptr);
++#else
+         map = CreateFileMappingW(file, nullptr, PAGE_READONLY, 0, 0, nullptr);
++#endif
+ 
+         CloseHandle(file);
+         if (map == nullptr) {
+@@ -187,7 +200,11 @@ typedef HANDLE MemoryMap;
+         }
+ 
+         /* map a view of the file into our address space */
++#if defined(FLUTTER_WINDOWS_PHONE)
++        pData->pHeader = reinterpret_cast<const DataHeader *>(MapViewOfFileFromApp(map, FILE_MAP_READ, 0, 0));
++#else
+         pData->pHeader = reinterpret_cast<const DataHeader *>(MapViewOfFile(map, FILE_MAP_READ, 0, 0, 0));
++#endif
+         if (pData->pHeader == nullptr) {
+             CloseHandle(map);
+             return false;

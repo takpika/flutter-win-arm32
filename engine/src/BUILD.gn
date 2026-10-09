@@ -4,7 +4,9 @@
 
 group("default") {
   testonly = true
-  if (target_os == "wasm") {
+  if (flutter_windows_phone) {
+    deps = [ "//flutter/shell/platform/embedder:flutter_engine" ]
+  } else if (target_os == "wasm") {
     deps = [ "//flutter/wasm" ]
   } else {
     deps = [ "//flutter" ]

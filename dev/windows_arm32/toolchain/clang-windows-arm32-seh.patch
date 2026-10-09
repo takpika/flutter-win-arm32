@@ -1,0 +1,351 @@
+--- a/clang/lib/CodeGen/CGCleanup.cpp
++++ b/clang/lib/CodeGen/CGCleanup.cpp
+@@ -783,8 +783,9 @@
+     cleanupFlags.setIsEHCleanupKind();
+ 
+   // Under -EHa, invoke seh.scope.end() to mark scope end before dtor
+-  bool IsEHa = getLangOpts().EHAsynch && !Scope.isLifetimeMarker();
+   const EHPersonality &Personality = EHPersonality::get(*this);
++  bool IsEHa = getLangOpts().EHAsynch && !Scope.isLifetimeMarker() &&
++               Personality.isMSVCPersonality();
+   if (!RequiresNormalCleanup) {
+     // Mark CPP scope end for passed-by-value Arg temp
+     //   per Windows ABI which is "normally" Cleanup in callee
+--- a/clang/lib/CodeGen/CodeGenModule.cpp
++++ b/clang/lib/CodeGen/CodeGenModule.cpp
+@@ -3537,6 +3537,11 @@
+ }
+ 
+ void CodeGenModule::AppendLinkerOptions(StringRef Opts) {
++  const llvm::Triple &Triple = getTarget().getTriple();
++  if (Triple.isWindowsGNUEnvironment() &&
++      (Triple.isARM() || Triple.isThumb()) &&
++      Opts == "/include:??3@YAXPAX@Z")
++    Opts = "/include:_ZdlPv";
+   auto *MDOpts = llvm::MDString::get(getLLVMContext(), Opts);
+   LinkerOptionsMetadata.push_back(llvm::MDNode::get(getLLVMContext(), MDOpts));
+ }
+--- a/clang/lib/Driver/ToolChains/Clang.cpp
++++ b/clang/lib/Driver/ToolChains/Clang.cpp
+@@ -158,8 +158,10 @@
+   bool EH = Args.hasFlag(options::OPT_fexceptions, options::OPT_fno_exceptions,
+                          false);
+ 
+-  // Async exceptions are Windows MSVC only.
+-  if (Triple.isWindowsMSVCEnvironment()) {
++  // Windows ARM32 also supports SEH when using the GNU C++ ABI.
++  if (Triple.isWindowsMSVCEnvironment() ||
++      (Triple.isWindowsGNUEnvironment() &&
++       (Triple.isARM() || Triple.isThumb()))) {
+     bool EHa = Args.hasFlag(options::OPT_fasync_exceptions,
+                             options::OPT_fno_async_exceptions, false);
+     if (EHa) {
+--- a/clang/lib/Parse/ParsePragma.cpp
++++ b/clang/lib/Parse/ParsePragma.cpp
+@@ -1235,7 +1235,10 @@
+ 
+ bool Parser::HandlePragmaMSInitSeg(StringRef PragmaName,
+                                    SourceLocation PragmaLocation) {
+-  if (getTargetInfo().getTriple().getEnvironment() != llvm::Triple::MSVC) {
++  const llvm::Triple &Triple = getTargetInfo().getTriple();
++  if (Triple.getEnvironment() != llvm::Triple::MSVC &&
++      !(Triple.isWindowsGNUEnvironment() &&
++        (Triple.isARM() || Triple.isThumb()))) {
+     PP.Diag(PragmaLocation, diag::warn_pragma_init_seg_unsupported_target);
+     return false;
+   }
+--- a/llvm/lib/CodeGen/AsmPrinter/WinException.cpp
++++ b/llvm/lib/CodeGen/AsmPrinter/WinException.cpp
+@@ -34,8 +34,9 @@
+ 
+ WinException::WinException(AsmPrinter *A) : EHStreamer(A) {
+   // MSVC's EH tables are always composed of 32-bit words.  All known 64-bit
+-  // platforms use an imagerel32 relocation to refer to symbols.
+-  useImageRel32 = (A->getDataLayout().getPointerSizeInBits() == 64);
++  // platforms and Windows Thumb use imagerel32 relocations for symbols.
++  useImageRel32 = A->getDataLayout().getPointerSizeInBits() == 64 ||
++                  Asm->TM.getTargetTriple().isThumb();
+   isAArch64 = Asm->TM.getTargetTriple().isAArch64();
+   isThumb = Asm->TM.getTargetTriple().isThumb();
+ }
+@@ -342,6 +343,10 @@
+   const TargetFrameLowering &TFI = *Asm->MF->getSubtarget().getFrameLowering();
+   Register UnusedReg;
+   if (Asm->MAI->usesWindowsCFI()) {
++    if (isThumb) {
++      const auto &Frame = Asm->MF->getFrameInfo();
++      return Frame.getObjectOffset(FrameIndex);
++    }
+     StackOffset Offset =
+         TFI.getFrameIndexReferencePreferSP(*Asm->MF, FrameIndex, UnusedReg,
+                                            /*IgnoreSPUpdates*/ true);
+--- a/llvm/lib/Target/ARM/ARMAsmPrinter.cpp
++++ b/llvm/lib/Target/ARM/ARMAsmPrinter.cpp
+@@ -22,6 +22,8 @@
+ #include "TargetInfo/ARMTargetInfo.h"
+ #include "llvm/ADT/SmallString.h"
+ #include "llvm/BinaryFormat/COFF.h"
++#include "llvm/CodeGen/MachineFrameInfo.h"
++#include "llvm/CodeGen/TargetRegisterInfo.h"
+ #include "llvm/CodeGen/MachineJumpTableInfo.h"
+ #include "llvm/CodeGen/MachineModuleInfoImpls.h"
+ #include "llvm/IR/Constants.h"
+@@ -149,6 +151,24 @@
+   SetupMachineFunction(MF);
+   const Function &F = MF.getFunction();
+   const TargetMachine& TM = MF.getTarget();
++
++  if (TM.getTargetTriple().isThumb() &&
++      TM.getTargetTriple().isOSWindows() && F.hasPersonalityFn()) {
++    const MachineFrameInfo &Frame = MF.getFrameInfo();
++    const auto *RI = MF.getSubtarget().getRegisterInfo();
++    StringRef Name = GlobalValue::dropLLVMManglingEscape(F.getName());
++    auto Emit = [&](StringRef Prefix, int64_t Value) {
++      OutStreamer->emitAssignment(
++          OutContext.getOrCreateSymbol(Twine(Prefix) + Name),
++          MCConstantExpr::create(Value, OutContext));
++    };
++    Emit("$sehframesize$", Frame.getStackSize());
++    Emit("$sehallocsize$", Frame.getStackSize() +
++                             (RI->hasStackRealignment(MF)
++                                  ? AFI->getGPRCalleeSavedArea3Size() : 0));
++    Emit("$sehframemask$", RI->hasStackRealignment(MF)
++                              ? -int64_t(Frame.getMaxAlign().value()) : -1);
++  }
+ 
+   // Collect all globals that had their storage promoted to a constant pool.
+   // Functions are emitted before variables, so this accumulates promoted
+@@ -1958,9 +1978,19 @@
+       MI->getFlag(MachineInstr::FrameSetup))
+     EmitUnwindingInstruction(MI);
+ 
++  if (STI.isTargetWindows() && MI->getParent()->isEHFuncletEntry() &&
++      MI == &MI->getParent()->front()) {
++    if (auto *Frame = OutStreamer->EnsureValidWinFrameInfo(SMLoc()))
++      ATS.emitThumbFunc(const_cast<MCSymbol *>(Frame->Function));
++  }
++
+   // Do any auto-generated pseudo lowerings.
+   if (MCInst OutInst; lowerPseudoInstExpansion(MI, OutInst)) {
+     EmitToStreamer(*OutStreamer, OutInst);
++    if (MI->getOpcode() == ARM::tCLEANUPRET && MF->hasWinCFI()) {
++      ATS.emitARMWinCFINop(/*Wide=*/false);
++      ATS.emitARMWinCFIEpilogEnd();
++    }
+     return;
+   }
+ 
+--- a/llvm/lib/Target/ARM/ARMBaseRegisterInfo.cpp
++++ b/llvm/lib/Target/ARM/ARMBaseRegisterInfo.cpp
+@@ -230,6 +230,8 @@
+   // FIXME: avoid re-calculating this every time.
+   BitVector Reserved(getNumRegs());
+   markSuperRegs(Reserved, ARM::SP);
++  if (STI.isTargetWindows() && MF.hasEHFunclets())
++    markSuperRegs(Reserved, ARM::R7);
+   markSuperRegs(Reserved, ARM::PC);
+   markSuperRegs(Reserved, ARM::FPSCR);
+   markSuperRegs(Reserved, ARM::FPSCR_RM);
+@@ -829,6 +831,12 @@
+   assert(!AFI->isThumb1OnlyFunction() &&
+          "This eliminateFrameIndex does not support Thumb1!");
+   int FrameIndex = MI.getOperand(FIOperandNum).getIndex();
++  if (MI.getOpcode() == TargetOpcode::LOCAL_ESCAPE) {
++    const MachineFrameInfo &Frame = MF.getFrameInfo();
++    MI.getOperand(FIOperandNum).ChangeToImmediate(
++        Frame.getObjectOffset(FrameIndex));
++    return false;
++  }
+   Register FrameReg;
+ 
+   int Offset = TFI->ResolveFrameIndexReference(MF, FrameIndex, FrameReg, SPAdj);
+--- a/llvm/lib/Target/ARM/ARMExpandPseudoInsts.cpp
++++ b/llvm/lib/Target/ARM/ARMExpandPseudoInsts.cpp
+@@ -983,6 +983,8 @@
+     }
+     return MachineOperand::CreateImm(Imm);
+   }
++  case MachineOperand::MO_MCSymbol:
++    return MachineOperand::CreateMCSymbol(MO.getMCSymbol(), TF);
+   case MachineOperand::MO_ExternalSymbol:
+     return MachineOperand::CreateES(MO.getSymbolName(), TF);
+   case MachineOperand::MO_JumpTableIndex:
+--- a/llvm/lib/Target/ARM/ARMFrameLowering.cpp
++++ b/llvm/lib/Target/ARM/ARMFrameLowering.cpp
+@@ -336,6 +336,9 @@
+   const TargetRegisterInfo *RegInfo = MF.getSubtarget().getRegisterInfo();
+   const MachineFrameInfo &MFI = MF.getFrameInfo();
+ 
++  if (STI.isTargetWindows() && MF.hasEHFunclets())
++    return true;
++
+   // Check to see if the target want to forcibly keep frame pointer.
+   if (keepFramePointer(MF))
+     return true;
+@@ -622,6 +625,7 @@
+     }
+     break;
+ 
++  case ARM::tCLEANUPRET:
+   case ARM::tBX_RET:
+   case ARM::t2BXAUT_RET:
+   case ARM::TCRETURNri:
+@@ -1395,6 +1399,30 @@
+   // checks for hasVarSizedObjects.
+   if (MFI.hasVarSizedObjects())
+     AFI->setShouldRestoreSPFromFP(true);
++
++  if (STI.isTargetWindows() && MF.hasEHFunclets()) {
++    if (MBB.isEHFuncletEntry()) {
++      if (RegInfo->hasStackRealignment(MF)) {
++        emitRegPlusImmediate(false, MBB, MBBI, dl, TII, ARM::R7, ARM::R1,
++                             -int64_t(MFI.getStackSize() + GPRCS3Size));
++        emitAligningInstructions(MF, AFI, TII, MBB, MBBI, dl, ARM::R7,
++                                 MFI.getMaxAlign(), false);
++        emitRegPlusImmediate(false, MBB, MBBI, dl, TII, ARM::R7, ARM::R7,
++                             MFI.getStackSize());
++      } else {
++        BuildMI(MBB, MBBI, dl, TII.get(ARM::tMOVr), ARM::R7)
++            .addReg(ARM::R1)
++            .add(predOps(ARMCC::AL));
++      }
++      MBB.addLiveIn(ARM::R1);
++    } else if (RegInfo->hasStackRealignment(MF)) {
++      emitRegPlusImmediate(false, MBB, MBBI, dl, TII, ARM::R7, ARM::SP,
++                           MFI.getStackSize());
++    } else {
++      emitRegPlusImmediate(false, MBB, MBBI, dl, TII, ARM::R7, FramePtr,
++                           -MFI.getObjectOffset(FramePtrSpillFI));
++    }
++  }
+ }
+ 
+ void ARMFrameLowering::emitEpilogue(MachineFunction &MF,
+@@ -1566,6 +1594,11 @@
+   }
+ 
+   if (MF.hasWinCFI()) {
++    auto Return = MBB.getLastNonDebugInstr();
++    if (Return != MBB.end() && Return->getOpcode() == ARM::tCLEANUPRET) {
++      insertSEHRange(MBB, RangeStart, Return, TII, MachineInstr::FrameDestroy);
++      return;
++    }
+     insertSEHRange(MBB, RangeStart, MBB.end(), TII, MachineInstr::FrameDestroy);
+     BuildMI(MBB, MBB.end(), dl, TII.get(ARM::SEH_EpilogEnd))
+         .setMIFlag(MachineInstr::FrameDestroy);
+@@ -2363,7 +2396,7 @@
+   unsigned Limit = (1 << 12) - 1;
+   for (auto &MBB : MF) {
+     for (auto &MI : MBB) {
+-      if (MI.isDebugInstr())
++      if (MI.isDebugInstr() || MI.getOpcode() == TargetOpcode::LOCAL_ESCAPE)
+         continue;
+       for (unsigned i = 0, e = MI.getNumOperands(); i != e; ++i) {
+         if (!MI.getOperand(i).isFI())
+@@ -2532,6 +2565,8 @@
+                                             BitVector &SavedRegs,
+                                             RegScavenger *RS) const {
+   TargetFrameLowering::determineCalleeSaves(MF, SavedRegs, RS);
++  if (STI.isTargetWindows() && MF.hasEHFunclets())
++    SavedRegs.set(ARM::R7);
+   // This tells PEI to spill the FP as if it is any other callee-save register
+   // to take advantage the eliminateFrameIndex machinery. This also ensures it
+   // is spilled in the order specified by getCalleeSavedRegs() to make it easier
+--- a/llvm/lib/Target/ARM/ARMISelDAGToDAG.cpp
++++ b/llvm/lib/Target/ARM/ARMISelDAGToDAG.cpp
+@@ -3591,6 +3591,14 @@
+   }
+ 
+   switch (N->getOpcode()) {
++  case ISD::LOCAL_RECOVER: {
++    if (!Subtarget->isTargetWindows())
++      break;
++    unsigned Opcode = Subtarget->isThumb() ? ARM::t2MOVi32imm : ARM::MOVi32imm;
++    CurDAG->SelectNodeTo(N, Opcode, MVT::i32, N->getOperand(0));
++    return;
++  }
++
+   default: break;
+   case ISD::STORE: {
+     // For Thumb1, match an sp-relative store in C++. This is a little
+--- a/llvm/lib/Target/ARM/ARMISelLowering.cpp
++++ b/llvm/lib/Target/ARM/ARMISelLowering.cpp
+@@ -63,6 +63,7 @@
+ #include "llvm/CodeGen/TargetSubtargetInfo.h"
+ #include "llvm/CodeGen/ValueTypes.h"
+ #include "llvm/CodeGenTypes/MachineValueType.h"
++#include "llvm/MC/MCContext.h"
+ #include "llvm/IR/Attributes.h"
+ #include "llvm/IR/CallingConv.h"
+ #include "llvm/IR/Constant.h"
+@@ -3838,6 +3839,34 @@
+   SDLoc dl(Op);
+   switch (IntNo) {
+   default: return SDValue();    // Don't custom lower most intrinsics.
++  case Intrinsic::localaddress: {
++    if (!Subtarget->isTargetWindows())
++      return SDValue();
++    MachineFunction &MF = DAG.getMachineFunction();
++    if (MF.hasEHFunclets())
++      return DAG.getCopyFromReg(DAG.getEntryNode(), dl, ARM::R7,
++                               Op.getValueType());
++    int FI = MF.getFrameInfo().CreateFixedObject(1, 0, true);
++    return DAG.getFrameIndex(FI, Op.getValueType());
++  }
++  case Intrinsic::eh_recoverfp: {
++    if (!Subtarget->isTargetWindows())
++      return SDValue();
++    auto *Parent = cast<GlobalAddressSDNode>(Op.getOperand(1))->getGlobal();
++    StringRef Name = GlobalValue::dropLLVMManglingEscape(Parent->getName());
++    auto Constant = [&](StringRef Prefix) {
++      auto *Symbol = DAG.getMachineFunction().getContext().getOrCreateSymbol(
++          Twine(Prefix) + Name);
++      return DAG.getNode(ISD::LOCAL_RECOVER, dl, MVT::i32,
++                         DAG.getMCSymbol(Symbol, MVT::i32));
++    };
++    SDValue Size = Constant("$sehframesize$");
++    SDValue Allocation = Constant("$sehallocsize$");
++    SDValue Mask = Constant("$sehframemask$");
++    SDValue Base = DAG.getNode(ISD::SUB, dl, MVT::i32, Op.getOperand(2), Allocation);
++    Base = DAG.getNode(ISD::AND, dl, MVT::i32, Base, Mask);
++    return DAG.getNode(ISD::ADD, dl, MVT::i32, Base, Size);
++  }
+   case Intrinsic::thread_pointer: {
+     EVT PtrVT = getPointerTy(DAG.getDataLayout());
+     return DAG.getNode(ARMISD::THREAD_POINTER, dl, PtrVT);
+--- a/llvm/lib/Target/ARM/ARMMCInstLower.cpp
++++ b/llvm/lib/Target/ARM/ARMMCInstLower.cpp
+@@ -99,6 +99,9 @@
+   case MachineOperand::MO_MachineBasicBlock:
+     MCOp = MCOperand::createExpr(MCSymbolRefExpr::create(
+         MO.getMBB()->getSymbol(), OutContext));
++    break;
++  case MachineOperand::MO_MCSymbol:
++    MCOp = GetSymbolRef(MO, MO.getMCSymbol());
+     break;
+   case MachineOperand::MO_GlobalAddress:
+     MCOp = GetSymbolRef(MO,
+--- a/llvm/lib/Target/ARM/ARMInstrThumb.td
++++ b/llvm/lib/Target/ARM/ARMInstrThumb.td
+@@ -504,6 +504,10 @@
+ }
+ 
+ let isReturn = 1, isTerminator = 1, isBarrier = 1 in {
++  let isEHScopeReturn = 1, hasSideEffects = 1, hasCtrlDep = 1 in
++    def tCLEANUPRET : tPseudoExpand<(outs), (ins pred:$p), 2, IIC_Br,
++                     [(cleanupret bb)], (tBX LR, pred:$p)>, Sched<[WriteBr]>;
++
+   def tBX_RET : tPseudoExpand<(outs), (ins pred:$p), 2, IIC_Br,
+                    [(ARMretglue)], (tBX LR, pred:$p)>, Sched<[WriteBr]>;
+ 
+--- a/clang/include/clang/Basic/TargetInfo.h
++++ b/clang/include/clang/Basic/TargetInfo.h
+@@ -1667,7 +1667,7 @@
+   /// Whether the target supports SEH __try.
+   bool isSEHTrySupported() const {
+     return getTriple().isOSWindows() &&
+-           (getTriple().isX86() ||
++           (getTriple().isX86() || getTriple().isARM() || getTriple().isThumb() ||
+             getTriple().getArch() == llvm::Triple::aarch64);
+   }
+ 

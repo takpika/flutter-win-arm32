@@ -1,3 +1,7 @@
+> **Windows ARM32 port (Flutter 3.38.10):** Windows RT uses Win32; Windows 10
+> Mobile uses UWP. See the [SDK installation, application build and validation
+> instructions](dev/windows_arm32/README.md) for this fork. CI uses Ubuntu amd64.
+
 <a href="https://flutter.dev/">
   <h1 align="center">
     <picture>

@@ -15,7 +15,9 @@
 #include "flutter/fml/synchronization/waitable_event.h"
 
 #if defined(FML_OS_WIN)
+#include <process.h>
 #include <windows.h>
+#include "flutter/fml/platform/win/wstring_conversion.h"
 #elif defined(OS_FUCHSIA)
 #include <lib/zx/thread.h>
 #else
@@ -114,6 +116,19 @@ void SetThreadName(const std::string& name) {
   pthread_setname_np(pthread_self(),
                      name.substr(0, kLinuxMaxThreadNameLen).c_str());
 #elif defined(FML_OS_WIN)
+#if defined(_M_ARM) || defined(__arm__)
+  // Windows 10 exposes this API through KernelBase at runtime. Windows RT
+  // retains the debugger-exception implementation below.
+  using SetDescription = HRESULT(WINAPI*)(HANDLE, PCWSTR);
+  const auto module = GetModuleHandleW(L"KernelBase.dll");
+  const auto set_description = reinterpret_cast<SetDescription>(
+      module ? GetProcAddress(module, "SetThreadDescription") : nullptr);
+  if (set_description &&
+      SUCCEEDED(set_description(GetCurrentThread(),
+                                Utf8ToWideString(name).c_str()))) {
+    return;
+  }
+#endif
   THREADNAME_INFO info;
   info.dwType = 0x1000;
   info.szName = name.c_str();

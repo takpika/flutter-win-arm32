@@ -1,0 +1,13 @@
+{
+  "compiler": "../../compiler/bin/clang",
+  "llvmBin": "../../compiler/bin",
+  "sysroot": "../../llvm-mingw",
+  "resourceDir": "../../compiler/lib/clang/23",
+  "runtimeResourceDir": "../../llvm-mingw/lib/clang/21",
+  "systemIncludeDirs": [
+    "../../windows-sdk/include"
+  ],
+  "rtLibraryDirs": [
+    "../../atl/lib"
+  ]
+}

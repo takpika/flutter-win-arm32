@@ -69,6 +69,8 @@ sealed class AssetBuildTarget {
         return _linuxTarget(supportedAssetTypes, Architecture.x64);
       case TargetPlatform.linux_arm64:
         return _linuxTarget(supportedAssetTypes, Architecture.arm64);
+      case TargetPlatform.windows_arm:
+        return _windowsTarget(supportedAssetTypes, Architecture.arm);
       case TargetPlatform.windows_arm64:
         return _windowsTarget(supportedAssetTypes, Architecture.arm64);
       case TargetPlatform.darwin:
@@ -406,6 +408,7 @@ List<AndroidArch> _androidArchs(TargetPlatform targetPlatform, String? androidAr
     case TargetPlatform.tester:
     case TargetPlatform.web_javascript:
     case TargetPlatform.windows_x64:
+    case TargetPlatform.windows_arm:
     case TargetPlatform.windows_arm64:
     case TargetPlatform.unsupported:
       throwToolExit('Unsupported Android target platform: $targetPlatform.');

@@ -578,6 +578,7 @@ enum TargetPlatform {
   linux_arm64,
   windows_x64,
   windows_arm64,
+  windows_arm,
   fuchsia_arm64,
   fuchsia_x64,
   tester,
@@ -608,6 +609,7 @@ enum TargetPlatform {
       case TargetPlatform.tester:
       case TargetPlatform.web_javascript:
       case TargetPlatform.windows_x64:
+      case TargetPlatform.windows_arm:
       case TargetPlatform.windows_arm64:
       case TargetPlatform.unsupported:
         throw UnsupportedError('Unexpected Fuchsia platform $this');
@@ -622,6 +624,7 @@ enum TargetPlatform {
       case TargetPlatform.darwin:
         return 'macos';
       case TargetPlatform.windows_x64:
+      case TargetPlatform.windows_arm:
       case TargetPlatform.windows_arm64:
         return 'windows';
       case TargetPlatform.android:
@@ -652,6 +655,8 @@ enum TargetPlatform {
       case TargetPlatform.linux_arm64:
       case TargetPlatform.windows_arm64:
         return 'arm64';
+      case TargetPlatform.windows_arm:
+        return 'arm';
       case TargetPlatform.android:
       case TargetPlatform.android_arm:
       case TargetPlatform.android_arm64:
@@ -788,6 +793,7 @@ String getNameForTargetPlatform(TargetPlatform platform, {DarwinArch? darwinArch
     TargetPlatform.linux_arm64 => 'linux-arm64',
     TargetPlatform.windows_x64 => 'windows-x64',
     TargetPlatform.windows_arm64 => 'windows-arm64',
+    TargetPlatform.windows_arm => 'windows-arm',
     TargetPlatform.fuchsia_arm64 => 'fuchsia-arm64',
     TargetPlatform.fuchsia_x64 => 'fuchsia-x64',
     TargetPlatform.tester => 'flutter-tester',
@@ -813,6 +819,7 @@ TargetPlatform getTargetPlatformForName(String platform) {
     'linux-arm64' => TargetPlatform.linux_arm64,
     'windows-x64' => TargetPlatform.windows_x64,
     'windows-arm64' => TargetPlatform.windows_arm64,
+    'windows-arm' => TargetPlatform.windows_arm,
     'web-javascript' => TargetPlatform.web_javascript,
     'flutter-tester' => TargetPlatform.tester,
     _ => throw Exception('Unsupported platform name "$platform"'),
