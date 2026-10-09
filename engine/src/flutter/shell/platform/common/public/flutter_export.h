@@ -5,6 +5,12 @@
 #ifndef FLUTTER_SHELL_PLATFORM_COMMON_PUBLIC_FLUTTER_EXPORT_H_
 #define FLUTTER_SHELL_PLATFORM_COMMON_PUBLIC_FLUTTER_EXPORT_H_
 
+// The embedder header may already define this macro without visibility.
+// Select the desktop library annotation explicitly for these declarations.
+#ifdef FLUTTER_EXPORT
+#undef FLUTTER_EXPORT
+#endif
+
 #ifdef FLUTTER_DESKTOP_LIBRARY
 
 // Add visibility/export annotations when building the library.

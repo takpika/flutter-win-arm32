@@ -1,0 +1,7 @@
+assert(flutter_windows_phone)
+assert(flutter_phone_tool != "")
+import("//build/toolchain/windows_arm32/coff_toolchain.gni")
+
+windows_arm32_coff_toolchain("arm") {
+  driver = flutter_phone_tool
+}

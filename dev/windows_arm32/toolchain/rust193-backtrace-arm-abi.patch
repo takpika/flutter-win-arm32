@@ -1,0 +1,11 @@
+--- a/backtrace/src/dbghelp.rs
++++ b/backtrace/src/dbghelp.rs
+@@ -81,7 +81,7 @@
+                 // argument types and return type as our declaration, although
+                 // it might be either extern "C" or extern "system".
+                 cfg_if::cfg_if! {
+-                    if #[cfg(any(target_arch = "x86", not(windows_raw_dylib)))] {
++                    if #[cfg(any(target_arch = "arm", target_arch = "x86", not(windows_raw_dylib)))] {
+                         let _: unsafe extern "system" fn($($argty),*) -> $ret = super::windows_sys::$name;
+                     } else {
+                         let _: unsafe extern "C" fn($($argty),*) -> $ret = super::windows_sys::$name;

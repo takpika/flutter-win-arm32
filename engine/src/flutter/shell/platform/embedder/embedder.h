@@ -1065,6 +1065,12 @@ typedef struct {
   FlutterEngineDisplayId display_id;
   /// The view that this event is describing.
   int64_t view_id;
+  /// Phone embedder extension: physical safe-area margins supplied by the OS.
+  /// Appended for struct_size compatibility; older embedders default to zero.
+  double physical_view_padding_top;
+  double physical_view_padding_right;
+  double physical_view_padding_bottom;
+  double physical_view_padding_left;
 } FlutterWindowMetricsEvent;
 
 typedef struct {

@@ -1,0 +1,169 @@
+diff --git a/src/gpu/ganesh/gl/win/GrGLMakeWinInterface.cpp b/src/gpu/ganesh/gl/win/GrGLMakeWinInterface.cpp
+index 9208ad0..f0a96fd 100644
+--- a/src/gpu/ganesh/gl/win/GrGLMakeWinInterface.cpp
++++ b/src/gpu/ganesh/gl/win/GrGLMakeWinInterface.cpp
+@@ -15,29 +15,38 @@
+ 
+ namespace GrGLInterfaces {
+ sk_sp<const GrGLInterface> MakeWin() {
+-    if (nullptr == wglGetCurrentContext()) {
+-        return nullptr;
+-    }
+-
+     struct FreeModule { void operator()(HMODULE m) { (void)FreeLibrary(m); } };
+     std::unique_ptr<typename std::remove_pointer<HMODULE>::type, FreeModule> module(
+             LoadLibraryExA("opengl32.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32));
+     if (!module) {
+         return nullptr;
+     }
++    struct WinGLContext {
++        HMODULE module;
++        decltype(&wglGetCurrentContext) getCurrentContext;
++        decltype(&wglGetProcAddress) getProcAddress;
++    } context{module.get(),
++              reinterpret_cast<decltype(&wglGetCurrentContext)>(
++                      GetProcAddress(module.get(), "wglGetCurrentContext")),
++              reinterpret_cast<decltype(&wglGetProcAddress)>(
++                      GetProcAddress(module.get(), "wglGetProcAddress"))};
++    if (!context.getCurrentContext || !context.getProcAddress || !context.getCurrentContext()) {
++        return nullptr;
++    }
+     const GrGLGetProc win_get_gl_proc = [](void* ctx, const char* name) {
+-        SkASSERT(wglGetCurrentContext());
+-        if (GrGLFuncPtr p = (GrGLFuncPtr)GetProcAddress((HMODULE)ctx, name)) {
++        const auto* context = static_cast<WinGLContext*>(ctx);
++        SkASSERT(context->getCurrentContext());
++        if (GrGLFuncPtr p = (GrGLFuncPtr)GetProcAddress(context->module, name)) {
+             return p;
+         }
+-        if (GrGLFuncPtr p = (GrGLFuncPtr)wglGetProcAddress(name)) {
++        if (GrGLFuncPtr p = (GrGLFuncPtr)context->getProcAddress(name)) {
+             return p;
+         }
+         return (GrGLFuncPtr)nullptr;
+     };
+ 
+     GrGLGetStringFn* getString =
+-        (GrGLGetStringFn*)win_get_gl_proc((void*)module.get(), "glGetString");
++        (GrGLGetStringFn*)win_get_gl_proc(&context, "glGetString");
+     if (!getString) {
+         return nullptr;
+     }
+@@ -45,9 +54,9 @@ sk_sp<const GrGLInterface> MakeWin() {
+     GrGLStandard standard = GrGLGetStandardInUseFromString(verStr);
+ 
+     if (GR_IS_GR_GL_ES(standard)) {
+-        return GrGLMakeAssembledGLESInterface((void*)module.get(), win_get_gl_proc);
++        return GrGLMakeAssembledGLESInterface(&context, win_get_gl_proc);
+     } else if (GR_IS_GR_GL(standard)) {
+-        return GrGLMakeAssembledGLInterface((void*)module.get(), win_get_gl_proc);
++        return GrGLMakeAssembledGLInterface(&context, win_get_gl_proc);
+     }
+     return nullptr;
+ }
+diff --git a/src/ports/SkFontMgr_win_dw.cpp b/src/ports/SkFontMgr_win_dw.cpp
+index 38d4e45..bb74bcd 100644
+--- a/src/ports/SkFontMgr_win_dw.cpp
++++ b/src/ports/SkFontMgr_win_dw.cpp
+@@ -913,10 +913,9 @@ sk_sp<SkFontMgr> SkFontMgr_New_DirectWrite(IDWriteFactory* factory,
+ 
+     const WCHAR* defaultFamilyName = L"";
+     int defaultFamilyNameLen = 1;
++    #ifndef SK_WINUWP
+     NONCLIENTMETRICSW metrics;
+     metrics.cbSize = sizeof(metrics);
+-
+-    #ifndef SK_WINUWP
+     if (nullptr == fallback) {
+         if (SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, 0)) {
+             defaultFamilyName = metrics.lfMessageFont.lfFaceName;
+diff --git a/src/ports/SkOSFile_win.cpp b/src/ports/SkOSFile_win.cpp
+index 021ed06..7e16d57 100644
+--- a/src/ports/SkOSFile_win.cpp
++++ b/src/ports/SkOSFile_win.cpp
+@@ -52,6 +52,16 @@ static bool sk_ino(FILE* f, SkFILEID* id) {
+         return false;
+     }
+ 
++#if defined(FLUTTER_WINDOWS_PHONE)
++    FILE_ID_INFO info;
++    if (!GetFileInformationByHandleEx(file, FileIdInfo, &info, sizeof(info))) {
++        return false;
++    }
++    id->fVolume = info.VolumeSerialNumber;
++    static_assert(sizeof(info.FileId) == sizeof(id->fLsbSize) + sizeof(id->fMsbSize));
++    memcpy(&id->fLsbSize, info.FileId.Identifier, sizeof(id->fLsbSize));
++    memcpy(&id->fMsbSize, info.FileId.Identifier + sizeof(id->fLsbSize), sizeof(id->fMsbSize));
++#else
+     //TODO: call GetFileInformationByHandleEx on Vista and later with FileIdInfo.
+     BY_HANDLE_FILE_INFORMATION info;
+     if (0 == GetFileInformationByHandle(file, &info)) {
+@@ -60,6 +70,7 @@ static bool sk_ino(FILE* f, SkFILEID* id) {
+     id->fVolume = info.dwVolumeSerialNumber;
+     id->fLsbSize = info.nFileIndexLow + (((ULONGLONG)info.nFileIndexHigh) << 32);
+     id->fMsbSize = 0;
++#endif
+ 
+     return true;
+ }
+@@ -102,14 +113,22 @@ void* sk_fdmmap(int fileno, size_t* length) {
+         return nullptr;
+     }
+ 
++#if defined(FLUTTER_WINDOWS_PHONE)
++    SkAutoWinMMap mmap(CreateFileMappingFromApp(file, nullptr, PAGE_READONLY, 0, nullptr));
++#else
+     SkAutoWinMMap mmap(CreateFileMapping(file, nullptr, PAGE_READONLY, 0, 0, nullptr));
++#endif
+     if (!mmap.isValid()) {
+         //TODO: use SK_TRACEHR(GetLastError(), "Could not create file mapping.") to report.
+         return nullptr;
+     }
+ 
+     // Eventually call UnmapViewOfFile
++#if defined(FLUTTER_WINDOWS_PHONE)
++    void* addr = MapViewOfFileFromApp(mmap, FILE_MAP_READ, 0, 0);
++#else
+     void* addr = MapViewOfFile(mmap, FILE_MAP_READ, 0, 0, 0);
++#endif
+     if (nullptr == addr) {
+         //TODO: use SK_TRACEHR(GetLastError(), "Could not map view of file.") to report.
+         return nullptr;
+diff --git a/src/utils/win/SkDWrite.cpp b/src/utils/win/SkDWrite.cpp
+index b159e14..f574d9b 100644
+--- a/src/utils/win/SkDWrite.cpp
++++ b/src/utils/win/SkDWrite.cpp
+@@ -29,6 +29,10 @@ static void release_dwrite_factory() {
+ 
+ static void create_dwrite_factory(IDWriteFactory** factory) {
+     using DWriteCreateFactoryProc = decltype(DWriteCreateFactory)*;
++#if defined(FLUTTER_WINDOWS_PHONE)
++    // Use the OS DirectWrite entry point available to UWP applications.
++    DWriteCreateFactoryProc dWriteCreateFactoryProc = &DWriteCreateFactory;
++#else
+     DWriteCreateFactoryProc dWriteCreateFactoryProc;
+ 
+     dWriteCreateFactoryProc = reinterpret_cast<DWriteCreateFactoryProc>(GetProcAddress(
+@@ -41,6 +45,8 @@ static void create_dwrite_factory(IDWriteFactory** factory) {
+                 "DWriteCreateFactory"));
+     }
+ 
++    #endif
++
+     if (!dWriteCreateFactoryProc) {
+         HRESULT hr = HRESULT_FROM_WIN32(GetLastError());
+         if (!IS_ERROR(hr)) {
+@@ -127,9 +133,13 @@ HRESULT sk_get_locale_string(IDWriteLocalizedStrings* names, const WCHAR* prefer
+ }
+ 
+ HRESULT SkGetGetUserDefaultLocaleNameProc(SkGetUserDefaultLocaleNameProc* proc) {
++#if defined(FLUTTER_WINDOWS_PHONE)
++    *proc = &GetUserDefaultLocaleName;
++#else
+     *proc = reinterpret_cast<SkGetUserDefaultLocaleNameProc>(
+             GetProcAddress(LoadLibraryExW(L"Kernel32.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32),
+                            "GetUserDefaultLocaleName"));
++#endif
+     if (!*proc) {
+         HRESULT hr = HRESULT_FROM_WIN32(GetLastError());
+         if (!IS_ERROR(hr)) {

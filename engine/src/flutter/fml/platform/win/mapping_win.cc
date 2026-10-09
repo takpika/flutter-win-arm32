@@ -47,12 +47,23 @@ FileMapping::FileMapping(const fml::UniqueFD& fd,
     return;
   }
 
+#if defined(FLUTTER_WINDOWS_PHONE)
+  LARGE_INTEGER file_size = {};
+  if (!GetFileSizeEx(fd.get(), &file_size) || file_size.QuadPart < 0 ||
+      static_cast<uint64_t>(file_size.QuadPart) > SIZE_MAX) {
+    FML_DLOG(ERROR) << "Invalid file size. " << GetLastErrorMessage();
+    return;
+  }
+  const size_t mapping_size = static_cast<size_t>(file_size.QuadPart);
+#else
   const auto mapping_size = ::GetFileSize(fd.get(), nullptr);
 
   if (mapping_size == INVALID_FILE_SIZE) {
     FML_DLOG(ERROR) << "Invalid file size. " << GetLastErrorMessage();
     return;
   }
+
+#endif
 
   if (mapping_size == 0) {
     valid_ = true;
@@ -70,6 +81,10 @@ FileMapping::FileMapping(const fml::UniqueFD& fd,
     protect_flags = PAGE_READWRITE;
   }
 
+#if defined(FLUTTER_WINDOWS_PHONE)
+  mapping_handle_.reset(CreateFileMappingFromApp(fd.get(), nullptr,
+                                                protect_flags, 0, nullptr));
+#else
   mapping_handle_.reset(::CreateFileMapping(fd.get(),       // hFile
                                             nullptr,        // lpAttributes
                                             protect_flags,  // flProtect
@@ -78,6 +93,8 @@ FileMapping::FileMapping(const fml::UniqueFD& fd,
                                             nullptr         // lpName
                                             ));
 
+#endif
+
   if (!mapping_handle_.is_valid()) {
     return;
   }
@@ -85,7 +102,12 @@ FileMapping::FileMapping(const fml::UniqueFD& fd,
   const DWORD desired_access = read_only ? FILE_MAP_READ : FILE_MAP_WRITE;
 
   auto mapping = reinterpret_cast<uint8_t*>(
+#if defined(FLUTTER_WINDOWS_PHONE)
+      MapViewOfFileFromApp(mapping_handle_.get(), desired_access, 0,
+                          mapping_size));
+#else
       MapViewOfFile(mapping_handle_.get(), desired_access, 0, 0, mapping_size));
+#endif
 
   if (mapping == nullptr) {
     FML_DLOG(ERROR) << "Could not set up file mapping. "

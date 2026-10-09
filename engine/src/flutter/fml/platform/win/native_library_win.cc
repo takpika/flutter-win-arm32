@@ -16,7 +16,13 @@ NativeLibrary::NativeLibrary(const char* path)
     return;
   }
 
+#if defined(FLUTTER_WINDOWS_PHONE)
+  // UWP resolves relative names through the package dependency graph.
+  // The Phone runner supplies packaged library names, not external DLL paths.
+  handle_ = ::LoadPackagedLibrary(Utf8ToWideString(path).c_str(), 0);
+#else
   handle_ = ::LoadLibrary(Utf8ToWideString(path).c_str());
+#endif
 }
 
 NativeLibrary::NativeLibrary(Handle handle, bool close_handle)
@@ -46,7 +52,15 @@ fml::RefPtr<NativeLibrary> NativeLibrary::CreateWithHandle(
 }
 
 fml::RefPtr<NativeLibrary> NativeLibrary::CreateForCurrentProcess() {
+#if defined(FLUTTER_WINDOWS_PHONE)
+  // The embedder engine owns the symbols requested by this convenience API.
+  // GetModuleHandle is unavailable to the UWP app API family. Balance the
+  // reference acquired by LoadPackagedLibrary in NativeLibrary's destructor.
+  return fml::AdoptRef(new NativeLibrary(
+      ::LoadPackagedLibrary(L"flutter_engine.dll", 0), true));
+#else
   return fml::AdoptRef(new NativeLibrary(::GetModuleHandle(nullptr), false));
+#endif
 }
 
 NativeLibrary::SymbolHandle NativeLibrary::Resolve(const char* symbol) const {

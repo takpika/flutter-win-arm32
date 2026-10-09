@@ -21,9 +21,9 @@
 #include "flutter/shell/platform/windows/windows_lifecycle_manager.h"
 #include "flutter/shell/platform/windows/windows_proc_table.h"
 #include "flutter/shell/platform/windows/windowsx_shim.h"
+#include "flutter/third_party/accessibility/ax/platform/ax_platform_node.h"
 #include "flutter/third_party/accessibility/ax/platform/ax_fragment_root_delegate_win.h"
 #include "flutter/third_party/accessibility/ax/platform/ax_fragment_root_win.h"
-#include "flutter/third_party/accessibility/ax/platform/ax_platform_node_win.h"
 #include "flutter/third_party/accessibility/gfx/native_widget_types.h"
 
 namespace flutter {
@@ -167,7 +167,8 @@ class FlutterWindow : public KeyboardManager::WindowDelegate,
   // |FlutterWindowBindingHandler|
   virtual bool OnBitmapSurfaceUpdated(const void* allocation,
                                       size_t row_bytes,
-                                      size_t height) override;
+                                      size_t height,
+                                      bool top_down = true) override;
 
   // |FlutterWindowBindingHandler|
   virtual PointerLocation GetPrimaryPointerLocation() override;
@@ -274,7 +275,11 @@ class FlutterWindow : public KeyboardManager::WindowDelegate,
   std::unique_ptr<AlertPlatformNodeDelegate> alert_delegate_;
 
   // Accessibility node that represents an alert.
+#if defined(_M_ARM)
+  std::unique_ptr<ui::AXPlatformNode> alert_node_;
+#else
   std::unique_ptr<ui::AXPlatformNodeWin> alert_node_;
+#endif
 
   // Handles running DirectManipulation on the window to receive trackpad
   // gestures.

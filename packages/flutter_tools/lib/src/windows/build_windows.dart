@@ -29,6 +29,21 @@ import 'visual_studio.dart';
 // These characters appear to be fine: @%()-+_{}[]`~
 const _kBadCharacters = r"'#!$^&*=|,;<>?";
 
+File get _windowsArmCrossConfiguration => globals.fs.file(
+  globals.fs.path.join(
+    Cache.flutterRoot ?? '',
+    'bin',
+    'cache',
+    'artifacts',
+    'engine',
+    'windows-arm-release',
+    'toolchain',
+    'cross-build.json',
+  ),
+);
+
+bool get windowsArmCrossBuildAvailable => _windowsArmCrossConfiguration.existsSync();
+
 /// Builds the Windows project using msbuild.
 Future<void> buildWindows(
   WindowsProject windowsProject,
@@ -65,6 +80,19 @@ Future<void> buildWindows(
   final Directory buildDirectory = globals.fs.directory(
     globals.fs.path.join(projectPath, getWindowsBuildDirectory(targetPlatform)),
   );
+  final bool crossBuild =
+      targetPlatform == TargetPlatform.windows_arm && !globals.platform.isWindows;
+  final Map<String, dynamic>? crossConfiguration = crossBuild
+      ? jsonDecode(_windowsArmCrossConfiguration.readAsStringSync()) as Map<String, dynamic>
+      : null;
+  String crossPath(String key) {
+    final value = crossConfiguration![key] as String;
+    return globals.fs.path.isAbsolute(value)
+        ? value
+        : globals.fs.path.normalize(
+            globals.fs.path.join(_windowsArmCrossConfiguration.parent.path, value),
+          );
+  }
 
   final migrators = <ProjectMigrator>[
     CmakeCustomCommandMigration(windowsProject, globals.logger),
@@ -75,7 +103,11 @@ Future<void> buildWindows(
   ];
 
   final migration = ProjectMigration(migrators);
-  await migration.run();
+  // The cross SDK supplies its own toolchain and backend compatibility. It
+  // builds the existing application template without migrating its source.
+  if (!crossBuild) {
+    await migration.run();
+  }
 
   // Ensure that necessary ephemeral files are generated and up to date.
   _writeGeneratedFlutterConfig(windowsProject, buildInfo, target);
@@ -90,8 +122,10 @@ Future<void> buildWindows(
         processManager: globals.processManager,
         osUtils: globals.os,
       );
-  final String? cmakePath = visualStudio.cmakePath;
-  final String? cmakeGenerator = visualStudio.cmakeGenerator;
+  final String? cmakePath = crossBuild
+      ? crossConfiguration!['cmake'] as String
+      : visualStudio.cmakePath;
+  final String? cmakeGenerator = crossBuild ? 'Ninja' : visualStudio.cmakeGenerator;
   if (cmakePath == null || cmakeGenerator == null) {
     throwToolExit(
       'Unable to find suitable Visual Studio toolchain. '
@@ -108,23 +142,36 @@ Future<void> buildWindows(
       targetPlatform: targetPlatform,
       buildDir: buildDirectory,
       sourceDir: windowsProject.cmakeFile.parent,
+      crossArguments: crossBuild
+          ? <String>[
+              '-DCMAKE_TOOLCHAIN_FILE=${_windowsArmCrossConfiguration.parent.childFile('rt-cross.cmake').path}',
+              '-DCMAKE_BUILD_TYPE=${sentenceCase(buildModeName)}',
+              '-DFLUTTER_ARM32_TOOLCHAIN_ROOT=${crossPath('toolchainRoot')}',
+              '-DFLUTTER_ARM32_CPPWINRT_INCLUDE=${crossPath('cppWinrtInclude')}',
+            ]
+          : null,
     );
-    if (visualStudio.displayVersion == '17.1.0') {
+    if (!crossBuild && visualStudio.displayVersion == '17.1.0') {
       _fixBrokenCmakeGeneration(buildDirectory);
     }
     if (configOnly) {
       return;
     }
-    await _runBuild(cmakePath, buildDirectory, buildModeName);
+    await _runBuild(
+      cmakePath,
+      buildDirectory,
+      buildModeName,
+      installTarget: crossBuild ? 'install' : 'INSTALL',
+    );
   } finally {
     status.stop();
   }
 
   final String? binaryName = getCmakeExecutableName(windowsProject);
-  final File binaryFile = buildDirectory
-      .childDirectory('runner')
-      .childDirectory(sentenceCase(buildModeName))
-      .childFile('$binaryName.exe');
+  final Directory runnerDirectory = buildDirectory.childDirectory('runner');
+  final File binaryFile =
+      (crossBuild ? runnerDirectory : runnerDirectory.childDirectory(sentenceCase(buildModeName)))
+          .childFile('$binaryName.exe');
   final FileSystemEntity buildOutput = binaryFile.existsSync() ? binaryFile : binaryFile.parent;
   // We don't print a size because the output directory can contain
   // optional files not needed by the user and because the binary is not
@@ -146,9 +193,7 @@ Future<void> buildWindows(
     final Map<String, Object?> output = await sizeAnalyzer.analyzeAotSnapshot(
       aotSnapshot: codeSizeFile,
       // This analysis is only supported for release builds.
-      outputDirectory: globals.fs.directory(
-        globals.fs.path.join(buildDirectory.path, 'runner', 'Release'),
-      ),
+      outputDirectory: binaryFile.parent,
       precompilerTrace: precompilerTrace,
       type: 'windows',
     );
@@ -173,6 +218,7 @@ String getCmakeWindowsArch(TargetPlatform targetPlatform) {
   return switch (targetPlatform) {
     TargetPlatform.windows_x64 => 'x64',
     TargetPlatform.windows_arm64 => 'ARM64',
+    TargetPlatform.windows_arm => 'ARM',
     _ => throw Exception('Unsupported target platform "$targetPlatform".'),
   };
 }
@@ -183,6 +229,7 @@ Future<void> _runCmakeGeneration({
   required TargetPlatform targetPlatform,
   required Directory buildDir,
   required Directory sourceDir,
+  List<String>? crossArguments,
 }) async {
   final sw = Stopwatch()..start();
 
@@ -198,8 +245,8 @@ Future<void> _runCmakeGeneration({
       buildDir.path,
       '-G',
       generator,
-      '-A',
-      getCmakeWindowsArch(targetPlatform),
+      if (crossArguments == null) ...<String>['-A', getCmakeWindowsArch(targetPlatform)],
+      ...?crossArguments,
       '-DFLUTTER_TARGET_PLATFORM=${getNameForTargetPlatform(targetPlatform)}',
     ], trace: true);
   } on ArgumentError {
@@ -223,6 +270,7 @@ Future<void> _runBuild(
   Directory buildDir,
   String buildModeName, {
   bool install = true,
+  String installTarget = 'INSTALL',
 }) async {
   final sw = Stopwatch()..start();
 
@@ -248,7 +296,7 @@ Future<void> _runBuild(
         buildDir.path,
         '--config',
         sentenceCase(buildModeName),
-        if (install) ...<String>['--target', 'INSTALL'],
+        if (install) ...<String>['--target', installTarget],
         if (globals.logger.isVerbose) '--verbose',
       ],
       environment: <String, String>{if (globals.logger.isVerbose) 'VERBOSE_SCRIPT_LOGGING': 'true'},

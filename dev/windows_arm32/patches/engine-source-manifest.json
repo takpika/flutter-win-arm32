@@ -1,0 +1,380 @@
+{
+  "baseFrameworkRevision": "c6f67dede3d4aa1aa7a69dd56a3494a5cde6cc80",
+  "baseEngineRevision": "cafcda5721a78a7884db92f13c5e89f7643d52dd",
+  "files": [
+    {
+      "path": "engine/src/flutter/assets/directory_asset_bundle.cc",
+      "originalSha256": "455ddf5b7c4c5c91fc45b5ced97853e320da5b0d7d8f7cfecc5fd09c72ba2cde",
+      "patchedSha256": "67b3ac99275f0eeeeb78d6170e61cb49766ed18de7eb6bcee21d36e356779b7a"
+    },
+    {
+      "path": "engine/src/flutter/assets/directory_asset_bundle.h",
+      "originalSha256": "b7d1b1b44670132704ee61c9fc4de3ddcba496dbc77f8d43f6f185858e24cde9",
+      "patchedSha256": "5b641db6f131cdda2a518fcedd3cd93ff5e0947f0e7f0d3dbbf841e45cf46eef"
+    },
+    {
+      "path": "engine/src/flutter/fml/platform/win/file_win.cc",
+      "originalSha256": "da4e3c8cf9afcb0143e5838e693fef4aa499c841d155c6e5e62c0837b1d909c8",
+      "patchedSha256": "63feae97b1fb0f7b6017fc1dbf6f8c6d44493af53d1a09f0cfa9f29e1450659f"
+    },
+    {
+      "path": "engine/src/flutter/fml/platform/win/mapping_win.cc",
+      "originalSha256": "e5b3a24fef5d91ff7979b237dd18ca1bb9629bbf565109cb5fe0152634ed269c",
+      "patchedSha256": "52e64fc550729fcab1be45a9391fde99bf30211229f0bf8fc529a95efdb45c25"
+    },
+    {
+      "path": "engine/src/flutter/fml/platform/win/message_loop_win.cc",
+      "originalSha256": "02dc5eb2fa5fa892403086f8d600537a7b7e1a0bf32acf5923430b2a65632182",
+      "patchedSha256": "e24a6fa69043e7a0f4d94bd007859ead53617b00bf2f687b1c03cc71544e2cf1"
+    },
+    {
+      "path": "engine/src/flutter/fml/platform/win/native_library_win.cc",
+      "originalSha256": "12b15fd980545a93a281d0300d11b25e9e07b56b076e6767db8dd80c7abf4f8f",
+      "patchedSha256": "926d0e94d97278b44bfca3f3a9889bed0be723c617f951d8c65211463b147c5b"
+    },
+    {
+      "path": "engine/src/flutter/fml/platform/win/paths_win.cc",
+      "originalSha256": "7a840dcf37011ebc1f5f6b5f04f70ecca07e412f803c40ee46a5cb862bdf2ea4",
+      "patchedSha256": "83db9d198e1d3e19273b94515f19727e736ee8056e9fe094f41c6e89e0262fb0"
+    },
+    {
+      "path": "engine/src/flutter/fml/string_conversion.cc",
+      "originalSha256": "3e9771e65a41d9a10e096d34ac85287bef23610d8783112444b7e479af78f813",
+      "patchedSha256": "c136a679f8fda7d427c3f8d26759ea421675645f9c9b05a9b6171f21d81577ad"
+    },
+    {
+      "path": "engine/src/flutter/fml/thread.cc",
+      "originalSha256": "e16d4b0bb3d142cfc0c67121bfc2811cc612b0e2d8f1fd79472653b9febf72e9",
+      "patchedSha256": "be55bb88816a0998c56b6a65253451f4a1784753e1b7c30168af24a404cbf74e"
+    },
+    {
+      "path": "engine/src/flutter/impeller/renderer/backend/gles/gles.h",
+      "originalSha256": "91c6611b37fada76e5e12dd5df92c98d0bcca356ebd3fdf4dc123e8304230e4f",
+      "patchedSha256": "f804d09bf9e4715f74f78123fd5cb69d729df55e365c8f58c5b628847cb19663"
+    },
+    {
+      "path": "engine/src/flutter/lib/ui/text/asset_manager_font_provider.cc",
+      "originalSha256": "95473f787a0fc89881149bbe1b363abc4f7dcac37f29f205444859be260522be",
+      "patchedSha256": "22716f2a0a17d940dcc8db617d86611a455881150cde9092d503c3943e88dae5"
+    },
+    {
+      "path": "engine/src/flutter/runtime/dart_isolate.cc",
+      "originalSha256": "684476d93b52f14389b59ba84096097f5efb348c0c439dd151bfe7b239b93c0d",
+      "patchedSha256": "dcdbd9abd0169e966102a972d8f5141e0fd818a73beb3f84d9290a3645c317ed"
+    },
+    {
+      "path": "engine/src/flutter/shell/common/run_configuration.cc",
+      "originalSha256": "f5f55ff135fa25abb15ca32ac688da3d766726c25460dc8dd54ad2df2d5f3969",
+      "patchedSha256": "fe054a8d3af5758d3278468638be3c49740333d03a67bae146e7b43647df4d6a"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/common/engine_switches.cc",
+      "originalSha256": "e85ef3a55cf054aa67d6846e616d979ddeaaac01c32429c5a94504a157c65838",
+      "patchedSha256": "b0aab573ec3ff53182686b49f2c0adfd510ed54f34dc34061860bf532bbe0762"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/common/public/flutter_export.h",
+      "originalSha256": "2441f5beaf86b79e34b84876a93ffa6191da560d2362fa4019209d3acc678217",
+      "patchedSha256": "b903ee7096bb6e660a22a2521af3564149fb82cd354afd61ccd7edbfa8f305d8"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/embedder/BUILD.gn",
+      "originalSha256": "00e2cdc92a231afdb49aa9c2b7c0affc58db21705a98ee51f052467e2d32c8d4",
+      "patchedSha256": "5d55fc76f345f495fb4de588ca5265fb0df3b5447ddffcf1435cf537a14963d5"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/embedder/embedder.cc",
+      "originalSha256": "b144ef7af9f3fd506e5f9f4ba3fa6881309d82401398fcc23e6265f4455486ab",
+      "patchedSha256": "0f8d11033d6a3eb8d728a40e0ee7570637dee96f767949a2c60b142cdf489787"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/embedder/embedder.h",
+      "originalSha256": "6a517e6e2746d1018d238ddf84a11eb91b73ce16c715c40fa0e6f9c501c4218b",
+      "patchedSha256": "9ba367d7abd695209b976cf50acfb620511712b7d3da0861d5174b90020022ef"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/embedder/embedder_external_texture_gl.cc",
+      "originalSha256": "787d9d6cb1650d4c61c91806e7a06474e86a5817eb92e54867792017cd178620",
+      "patchedSha256": "baba774f9da55287f982f157d9118f5fb9e7fd4209675ebd3c020a6df8b8bab0"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/embedder/platform_view_embedder.cc",
+      "originalSha256": "efe24543c5b9919afaf593d534631948330484096c6417503c86cf22a8732757",
+      "patchedSha256": "4fc7650f2269f064d7c7308a60b96b2ac2e6729ebc5d5e6b0329ad8d3e509e34"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/client_wrapper/flutter_view_controller.cc",
+      "originalSha256": "2b48455a2fb4d413768e985b4936fb3b4b9db684338763a6f60aa27ae8b06701",
+      "patchedSha256": "4abd2d87000243642bcf85c13a10b9c3d162b3026c0af923585ae64555c28c24"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/client_wrapper/include/flutter/flutter_view_controller.h",
+      "originalSha256": "e451580a4370c99c469efd0fd52550d034d1a565a994425fca860e99997411f8",
+      "patchedSha256": "9c53ea9e5dd49f60475ae6a0eef688b577edcb3f6bb8cf3014ad4e19acec9d53"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/compositor_opengl.cc",
+      "originalSha256": "23f4c8821826ab9633d5043fe285783fd87fed58faa9cc78477e93016f681580",
+      "patchedSha256": "2eee2c29ec0d15a70b92b979feea8a86e70ed0f426a5a4dad467a7504e976fdd"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/compositor_opengl.h",
+      "originalSha256": "96eb0202c11597bfbe975e5c5dddae115d0d1f1e541e9e4d79db362fb993b505",
+      "patchedSha256": "1cc86d07827034e712c9b3475d455beb7cbdcf1d538000f455352234fae86bb3"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/egl/manager.cc",
+      "originalSha256": "63f060317ace3f3e93d7d1e5a5668499a8d145b8b46c4b7e93d10cbb82bbc2aa",
+      "patchedSha256": "0e591b17c312f64d923e491f672a8004d44db380927351d53ba295753a766947"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/flutter_window.cc",
+      "originalSha256": "77359031cd796bb233d17c3bc4155d72123a3ac21b49e3061813bfa7e4b30f3d",
+      "patchedSha256": "e127ee2d1622288b688f9a15076d23f06a9ed11bb8a8d14b7f32a9f9efe60384"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/flutter_window.h",
+      "originalSha256": "8d00ec9f00f1c1551f347ab63e8f4c0e764c28ba8ab9815347a1b1051570a127",
+      "patchedSha256": "8b04a382dd72fb44b085c455683059c7cb3eb25faa4c72c2701bc642ae5ddab6"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/flutter_windows.cc",
+      "originalSha256": "fe465eeb57557761e66b84ad434b400f9b884d9b400d8387ef5b4a201d561603",
+      "patchedSha256": "2dd8f90f5d530aa28e61db1f82fba8849412b04c28e636f3d385800d5aec86e3"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/flutter_windows_engine.cc",
+      "originalSha256": "cf7ef1f50b6c96ebb36ce4f1f3a4ff57bfe9193ca7c7e678271e2f18ef32a034",
+      "patchedSha256": "8fc4a756f6fc81e94a89a7fe3c1172ba26d88dad445484bca15d4462e9043756"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/flutter_windows_view.cc",
+      "originalSha256": "82bf3d9bf6a9b1d9396f8f0b2aa63fd47d845c4c0b20d7312658f2d594c993ea",
+      "patchedSha256": "3d738d9b3306d66bac07078730ad78c50ea8f608d76eab4959060292045fb0f4"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/flutter_windows_view.h",
+      "originalSha256": "632828f1a7da847452202066d921bde8b9b522618be8dc4c9ba7971a5667c6f9",
+      "patchedSha256": "636f2e797d6b58cef4aa64d86e6f76d619a77d1befaf76391c1b3b3913affe2d"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/testing/mock_window_binding_handler.h",
+      "originalSha256": "9790a7bdf83d72ef9fbc040203ebfbdfd92915be1a4a06b872bca649b092ab4f",
+      "patchedSha256": "9afe480867d413816cdfbb6ba284b2f41aba77a9cfac1ff93bda0a43cae9686f"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/window_binding_handler.h",
+      "originalSha256": "8a7fb222ad151253973981748e14055a8831d1113c28e5032c27b5042052bcb5",
+      "patchedSha256": "d01fd7da70480d84e5a41aa82c02b68d551de97c05cff31f0a958016d3e8508e"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/window_manager.cc",
+      "originalSha256": "4f213d40904ebb6c90131dd4ec5a01d006f5b1051dd88bd1beb32d266441b40a",
+      "patchedSha256": "9186acdf329ec1b91d949dac5013266c82b25c6b6ad6fa3256a25c9042b68965"
+    },
+    {
+      "path": "engine/src/flutter/skia/BUILD.gn",
+      "originalSha256": "3baff251508feeca13973c6cc61ea0e452af4353054750a064711410746799a6",
+      "patchedSha256": "dfc70295217cf1aebc3fc20a1f3509f4f4e25204f9afd1df8e8d7f54bf7fce69"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/uwp/compat/BUILD.gn",
+      "originalSha256": null,
+      "patchedSha256": "c640368d6d3f62421923688f70f1d2b0c482ee3eb719a8ca02ed75be961771eb"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/uwp/compat/windows_api.def",
+      "originalSha256": null,
+      "patchedSha256": "30850ddab70b2aa814cf69e9e08e41487d6f13dd848f5961d280e53e30bec256"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/uwp/compat/windows_api.cc",
+      "originalSha256": null,
+      "patchedSha256": "b53490cbb51c857bbb2f152c2904e85af83219125fb9dd9d6686fe715a2617c5"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/uwp/compat/downloads_folder.h",
+      "originalSha256": null,
+      "patchedSha256": "a30e0746698922e3bc6fb60aedfcc20a23ab7a1e8d93c7233cd735ae30798428"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/uwp/compat/storage_access.h",
+      "originalSha256": null,
+      "patchedSha256": "fae7292612ecdef4d17c68cec98ef8205146c9665397802d34f094e8aaf39a8a"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/uwp/compat/storage_handle.h",
+      "originalSha256": null,
+      "patchedSha256": "06428f70fad3f4e9fd4b5e72639481cdbd8cef8d1eae75627f4bf74f5ee7d655"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/uwp/compat/runtime_imports.c",
+      "originalSha256": null,
+      "patchedSha256": "89ac4b656b2a44285748cd8a062f72ae843925e16642b213be9b9ead8e35c4ab"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/uwp/compat/directory_listing.h",
+      "originalSha256": null,
+      "patchedSha256": "ea0dc2d3296ad7be3c43a847248e9f7d3c24b9ab0dcbeddc67c1b945e9bc45ed"
+    },
+    {
+      "path": "engine/src/flutter/tools/gn",
+      "originalSha256": "177a1fc391c393d77f2a268c4f95d8ef9b68e3c9dcf6dbbe2bfaeb40a423ec22",
+      "patchedSha256": "6a240145e795c849d37a7e1e621c8309f7260de5221fb64cb6ddaa1cd371e438"
+    },
+    {
+      "path": "engine/src/flutter/build/archives/BUILD.gn",
+      "originalSha256": "1dcd07f0f42a3e284a92384cf2c1217fc2188405598bf6d7498740775253f42d",
+      "patchedSha256": "c97fd88d2adaf7ba7532f8c6d7d9bd99635b59f4802d9cb45d286920620be912"
+    },
+    {
+      "path": "engine/src/flutter/third_party/tonic/filesystem/filesystem/file.cc",
+      "originalSha256": "98a8be14b03510b9c605feb9ba57f6f615079ed63120271fdd0e024ce4e9cd5d",
+      "patchedSha256": "2d3b735f16b7bde57c12ec5addfdf42a3d43350538190adf08255b1838ad504b"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/uwp/platform_message_handler.h",
+      "originalSha256": null,
+      "patchedSha256": "493368eb3ad46dbcd1890df6ea6d7e16ac4f622d20c826622c86f1c32cffd5f0"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/uwp/angle_surface.h",
+      "originalSha256": null,
+      "patchedSha256": "c75640c53649002a33d6b522cf9aeb9bb8928f3ac276c3476d2872a873401622"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/uwp/runtime_support.h",
+      "originalSha256": null,
+      "patchedSha256": "94dab9ab431dce2ecfaf8628ae4003722c0a222929e93bb5e4931e03f5746feb"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/uwp/flutter_view.h",
+      "originalSha256": null,
+      "patchedSha256": "acc5fe67a0ecc22341edcfa90e11a899384d8495dda3e095873bf9a3378e7d90"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/uwp/flutter_view.cc",
+      "originalSha256": null,
+      "patchedSha256": "21700cc70dc47cf01c76666bfd257b458d87fe6251d01d5d3f3b90a6a57b3b58"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/uwp/diagnostics.h",
+      "originalSha256": null,
+      "patchedSha256": "44517233dbaa9a55aeb2d0dbf1bb4f187ba36ab3ce77c034e2bae8b4e24e4896"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/uwp/diagnostics.cc",
+      "originalSha256": null,
+      "patchedSha256": "70014751bd2b37a0057020bf76dd44536214efb1d815e6f793bd844f82ecedde"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/uwp/services/application_environment.h",
+      "originalSha256": null,
+      "patchedSha256": "0bfe34e27f18590619120c601b8763b0d7c746509b3684efed886df22d158f8c"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/uwp/services/phone-clipboard.h",
+      "originalSha256": null,
+      "patchedSha256": "d9803251d67f95fb18b56de1db17d7b9366a4a3756b38609a2b9bc4db546a516"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/uwp/services/phone-input-geometry.h",
+      "originalSha256": null,
+      "patchedSha256": "bee1d21c2fcdaad551d0259143a4d4bcf9bd78a50f5dc1187b0e8252b60d92d1"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/uwp/services/phone-locales.h",
+      "originalSha256": null,
+      "patchedSha256": "3838dae0603e8d06942f44b7697fd26310c21de8065148c22864b68d5b4ef8e8"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/uwp/services/phone-navigation.h",
+      "originalSha256": null,
+      "patchedSha256": "36c680d4642118f46b8abcede0470f363eeca49946bf7f9338dd25ecd5037a35"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/uwp/services/phone-splash.h",
+      "originalSha256": null,
+      "patchedSha256": "b2c12d70c5f676132a9035234f3a8eb93931a69c844b92ed3ac5e87efc3e6295"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/uwp/services/phone-text-abi.h",
+      "originalSha256": null,
+      "patchedSha256": "cdda9628ab2b08b3a167ec19bd280dfb937c35eecf1ef8bd4ed8f6a6a5381fb6"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/uwp/services/phone-text-input.h",
+      "originalSha256": null,
+      "patchedSha256": "1cefc1bd5435e8f38d5d54e75158fc65ba5f5670236d6956f1ff1ff6fd62d41a"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/uwp/services/phone-mouse-cursor.h",
+      "originalSha256": null,
+      "patchedSha256": "8376b234ba5ca183d14ba1592fad9490dcb752360a8f57bf047daa9b4c15d56e"
+    },
+    {
+      "path": "engine/src/flutter/BUILD.gn",
+      "originalSha256": "d9dc13ccce37bf207f13a48fc2c7e417202c6201014bbaf7ffdcf915c81a4d3c",
+      "patchedSha256": "68ccfc6baa755718a216fd807df6e468d4bd302176f60a74cb420c1920c8e5b1"
+    }
+  ],
+  "nativeAccessibilityRestored": true,
+  "restoredFiles": [
+    {
+      "path": "engine/src/flutter/fml/time/time_delta.h",
+      "upstreamSha256": "86b96d2b612cbe5bca12a1bfd62cc379c27605c5130a13f8105420dc150bec88"
+    },
+    {
+      "path": "engine/src/flutter/fml/time/time_point.h",
+      "upstreamSha256": "c8c748d9d1081771255cd08e3f78271ef8e549cfdd5e984bf9f703df6808c7f0"
+    },
+    {
+      "path": "engine/src/flutter/fml/unique_object.h",
+      "upstreamSha256": "692fb0bb99c20c0db9ed08bd7fd57f4bef84378badccf2983665cd918cb880ed"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/client_wrapper/flutter_engine.cc",
+      "upstreamSha256": "f73aadeedec071d8178c38b11603267dff70152590e8225244cddde260c53879"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/flutter_project_bundle.cc",
+      "upstreamSha256": "90aed86e841c670c99f04517d50f82296de9d27eab072f355f281f35b29c8153"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/public/flutter_windows.h",
+      "upstreamSha256": "44c062e1be2080fb72f5a023ee59dafe6ffc07b4dd18c7e7e2d9348a66d65cce"
+    },
+    {
+      "path": "engine/src/flutter/runtime/BUILD.gn",
+      "upstreamSha256": "b9968d9bd550f978c9f3aca7f0841677e5f065ae0d7bacffc069477bb521bee0"
+    },
+    {
+      "path": "engine/src/flutter/lib/gpu/texture.cc",
+      "upstreamSha256": "3f98d83df34fbf508b874ca0e96516389d718734959f32e62507528ff99fbfd4"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/common/client_wrapper/include/flutter/method_result.h",
+      "upstreamSha256": "1b148ce7d807e562aba4e1e9ef7f67ddea8f564e383b87bcb44fba18978f1a40"
+    },
+    {
+      "path": "engine/src/flutter/runtime/runtime_controller.cc",
+      "upstreamSha256": "2e337b32ab62108c66787b23ec840961c04f2f018d00adc55e5e06c9333d0d6e"
+    },
+    {
+      "path": "engine/src/flutter/shell/platform/windows/BUILD.gn",
+      "upstreamSha256": "ab16a704ca450112cd9054a97708d462b057dd8d5dc64751246683afad8813c3"
+    },
+    {
+      "path": "engine/src/flutter/fml/memory/task_runner_checker.cc",
+      "upstreamSha256": "b7b102c7622265b0fe89e17620927e0abc03b697535476bad231bc23e6992fc1"
+    },
+    {
+      "path": "engine/src/flutter/fml/message_loop.cc",
+      "upstreamSha256": "5ae6876b480a74601fde25176665ce0183aad884c2298bc0837e6403e77e3c1c"
+    },
+    {
+      "path": "engine/src/flutter/shell/common/context_options.cc",
+      "upstreamSha256": "7543edf8467c6f0c8ee3e0770ee401b83e896edcfcdb983cd732e374c822008e"
+    }
+  ]
+}

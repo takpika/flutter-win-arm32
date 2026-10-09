@@ -45,6 +45,7 @@ class PlatformViewEmbedder::EmbedderPlatformMessageHandler
   fml::RefPtr<fml::TaskRunner> platform_task_runner_;
 };
 
+#ifdef SHELL_ENABLE_SOFTWARE
 PlatformViewEmbedder::PlatformViewEmbedder(
     PlatformView::Delegate& delegate,
     const flutter::TaskRunners& task_runners,
@@ -61,6 +62,8 @@ PlatformViewEmbedder::PlatformViewEmbedder(
           GetWeakPtr(),
           task_runners.GetPlatformTaskRunner())),
       platform_dispatch_table_(std::move(platform_dispatch_table)) {}
+
+#endif  // SHELL_ENABLE_SOFTWARE
 
 #ifdef SHELL_ENABLE_GL
 PlatformViewEmbedder::PlatformViewEmbedder(

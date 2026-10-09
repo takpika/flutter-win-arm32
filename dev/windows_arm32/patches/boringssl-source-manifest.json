@@ -1,0 +1,15 @@
+{
+  "upstreamRevision": "706742e482d89214f13a642ccfcdad596a24a32f",
+  "files": [
+    {
+      "path": "crypto/internal.h",
+      "originalSha256": "12a54980141ddb53eb7697eed80bf5a2d48f350b457b54f298cd4f099e82d781",
+      "patchedSha256": "2b7a9a48650aca670cc22b7b18a195c0951a9482de4f20eb764362a65776e86d"
+    },
+    {
+      "path": "crypto/thread_win.cc",
+      "originalSha256": "0692dd9c9be694d2037895db7cb9f540cb00ce8895cd0db7111840227dd11b31",
+      "patchedSha256": "3beb9b55f5ba21d3e32e4f32712b986a22d7ff650ee94d3529f6b87ffc99d192"
+    }
+  ]
+}

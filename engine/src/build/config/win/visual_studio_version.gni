@@ -22,7 +22,10 @@ declare_args() {
   windows_sdk_path = "C:\Program Files (x86)\Windows Kits\8.1"
 }
 
-if (visual_studio_path == "") {
+if (flutter_windows_phone || flutter_windows_arm32_tool != "") {
+  # Explicit cross-build drivers supply their SDK without VS discovery.
+  visual_studio_runtime_dirs = ""
+} else if (visual_studio_path == "") {
   _toolchain_data =
       exec_script("//build/vs_toolchain.py", [ "get_toolchain_dir" ], "scope")
   visual_studio_path = _toolchain_data.vs_path
@@ -35,5 +38,5 @@ if (visual_studio_path == "") {
          "You must set the visual_studio_version if you set the path")
   assert(wdk_path != "",
          "You must set the wdk_path if you set the visual studio path")
-  visual_studio_runtime_dirs = []
+  visual_studio_runtime_dirs = ""
 }

@@ -9,6 +9,7 @@ import("//flutter/shell/platform/config.gni")
 import("//flutter/shell/platform/glfw/config.gni")
 import("//flutter/testing/testing.gni")
 import("$dart_src/build/dart/copy_tree.gni")
+import("$dart_src/runtime/runtime_args.gni")
 
 # Whether to build the dartdevc sdk, libraries, and source files
 # required for the flutter web sdk.
@@ -127,7 +128,7 @@ group("flutter") {
         ]
       }
 
-      if (host_os == "linux") {
+      if (host_os == "linux" && build_analyze_snapshot) {
         public_deps += [
           # Built alongside gen_snapshot for 64 bit targets
           "$dart_src/runtime/bin:analyze_snapshot",

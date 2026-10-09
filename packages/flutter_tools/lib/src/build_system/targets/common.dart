@@ -197,7 +197,17 @@ class KernelSnapshot extends Target {
     final TargetPlatform targetPlatform = getTargetPlatformForName(targetPlatformEnvironment);
 
     // This configuration is all optional.
-    final String? frontendServerStarterPath = environment.defines[kFrontendServerStarterPath];
+    final String? frontendServerStarterPath = environment.defines[kFrontendServerStarterPath] ??
+        (targetPlatform == TargetPlatform.windows_arm
+            ? environment.fileSystem.path.join(
+                environment.artifacts.getArtifactPath(
+                  Artifact.windowsDesktopPath,
+                  platform: targetPlatform,
+                  mode: buildMode,
+                ),
+                'frontend_server_starter.dart',
+              )
+            : null);
     final List<String> extraFrontEndOptions = decodeCommaSeparated(
       environment.defines,
       kExtraFrontEndOptions,
@@ -217,6 +227,7 @@ class KernelSnapshot extends Target {
     switch (targetPlatform) {
       case TargetPlatform.darwin:
       case TargetPlatform.windows_x64:
+      case TargetPlatform.windows_arm:
       case TargetPlatform.windows_arm64:
       case TargetPlatform.linux_x64:
         forceLinkPlatform = true;
@@ -244,7 +255,9 @@ class KernelSnapshot extends Target {
       TargetPlatform.darwin => 'macos',
       TargetPlatform.ios => 'ios',
       TargetPlatform.linux_arm64 || TargetPlatform.linux_x64 => 'linux',
-      TargetPlatform.windows_arm64 || TargetPlatform.windows_x64 => 'windows',
+      TargetPlatform.windows_arm ||
+      TargetPlatform.windows_arm64 ||
+      TargetPlatform.windows_x64 => 'windows',
       TargetPlatform.tester || TargetPlatform.web_javascript => null,
       TargetPlatform.unsupported => TargetPlatform.throwUnsupportedTarget(),
     };
@@ -287,6 +300,21 @@ class KernelSnapshot extends Target {
     );
     if (output == null || output.errorCount != 0) {
       throw Exception();
+    }
+    if (targetPlatform == TargetPlatform.windows_arm) {
+      final File dependencyFile = environment.buildDir.childFile(depfile);
+      final Depfile dependencies = environment.depFileService.parse(dependencyFile);
+      final File sdkManifest = environment.fileSystem.file(environment.fileSystem.path.join(
+        environment.artifacts.getArtifactPath(
+          Artifact.windowsDesktopPath,
+          platform: targetPlatform,
+          mode: buildMode,
+        ),
+        'arm32-sdk-artifacts.json',
+      ));
+      environment.depFileService.writeToFile(
+        Depfile([...dependencies.inputs, sdkManifest], dependencies.outputs), dependencyFile,
+      );
     }
   }
 

@@ -1,0 +1,21 @@
+# SDK-owned Windows ARM32 compiler configuration; project files stay original.
+set(CMAKE_SYSTEM_NAME Windows)
+set(CMAKE_SYSTEM_PROCESSOR ARM)
+set(CMAKE_CXX_STANDARD 20 CACHE STRING "Windows ARM SDK C++ language level")
+list(APPEND CMAKE_TRY_COMPILE_PLATFORM_VARIABLES
+  FLUTTER_ARM32_TOOLCHAIN_ROOT FLUTTER_ARM32_CPPWINRT_INCLUDE)
+file(READ "${CMAKE_CURRENT_LIST_DIR}/toolchain.json" _flutter_arm32_config)
+string(JSON _flutter_arm32_sysroot GET "${_flutter_arm32_config}" sysroot)
+get_filename_component(_flutter_arm32_sysroot "${_flutter_arm32_sysroot}"
+  ABSOLUTE BASE_DIR "${CMAKE_CURRENT_LIST_DIR}")
+set(CMAKE_CXX_COMPILER "${CMAKE_CURRENT_LIST_DIR}/cmake-cxx")
+set(CMAKE_AR "${_flutter_arm32_sysroot}/bin/llvm-ar")
+set(CMAKE_RANLIB "${_flutter_arm32_sysroot}/bin/llvm-ranlib")
+set(CMAKE_RC_COMPILER "${CMAKE_CURRENT_LIST_DIR}/armv7-w64-mingw32-windres")
+set(CMAKE_PROJECT_INCLUDE "${CMAKE_CURRENT_LIST_DIR}/rt-project.cmake")
+set(CMAKE_SHARED_LIBRARY_PREFIX "")
+set(CMAKE_SHARED_MODULE_PREFIX "")
+set(CMAKE_CXX_FLAGS_INIT "-D_UCRT -D_WIN32_WINNT=0x0603 -DWINVER=0x0603 -D_NATIVE_NULLPTR_SUPPORTED -D_ARM_BARRIER_ISH=0xB")
+if(FLUTTER_ARM32_CPPWINRT_INCLUDE)
+  string(APPEND CMAKE_CXX_FLAGS_INIT " -I\"${FLUTTER_ARM32_CPPWINRT_INCLUDE}\"")
+endif()

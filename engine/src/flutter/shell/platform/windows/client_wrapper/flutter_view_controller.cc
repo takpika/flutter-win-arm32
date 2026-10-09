@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include <utility>
 
 namespace flutter {
 
@@ -15,6 +16,22 @@ FlutterViewController::FlutterViewController(int width,
   engine_ = std::make_shared<FlutterEngine>(project);
   controller_ = FlutterDesktopViewControllerCreate(width, height,
                                                    engine_->RelinquishEngine());
+  if (!controller_) {
+    std::cerr << "Failed to create view controller." << std::endl;
+    return;
+  }
+  view_ = std::make_unique<FlutterView>(
+      FlutterDesktopViewControllerGetView(controller_));
+}
+
+FlutterViewController::FlutterViewController(
+    int width,
+    int height,
+    std::shared_ptr<FlutterEngine> engine)
+    : engine_(std::move(engine)) {
+  controller_ =
+      FlutterDesktopViewControllerCreate(width, height,
+                                         engine_->RelinquishEngine());
   if (!controller_) {
     std::cerr << "Failed to create view controller." << std::endl;
     return;

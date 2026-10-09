@@ -24,6 +24,24 @@
 
 namespace fml {
 
+static HANDLE OpenWindowsFile(LPCWSTR name, DWORD access, DWORD share,
+                              LPSECURITY_ATTRIBUTES security, DWORD disposition,
+                              DWORD flags, HANDLE template_file) {
+#if defined(FLUTTER_WINDOWS_PHONE)
+  CREATEFILE2_EXTENDED_PARAMETERS parameters = {};
+  parameters.dwSize = sizeof(parameters);
+  parameters.dwFileAttributes = flags & 0x0000FFFF;
+  parameters.dwFileFlags = flags & 0xFFFF0000;
+  parameters.lpSecurityAttributes = security;
+  parameters.hTemplateFile = template_file;
+  return CreateFile2(name, access, share, disposition, &parameters);
+#else
+  return CreateFileW(name, access, share, security, disposition, flags,
+                     template_file);
+#endif
+}
+
+
 static std::string GetFullHandlePath(const fml::UniqueFD& handle) {
   wchar_t buffer[MAX_PATH] = {0};
   const DWORD buffer_size = ::GetFinalPathNameByHandle(
@@ -174,7 +192,7 @@ fml::UniqueFD OpenFile(const char* path,
   const DWORD flags = FILE_ATTRIBUTE_NORMAL;
 
   auto handle =
-      CreateFile(file_name.c_str(),                  // lpFileName
+      OpenWindowsFile(file_name.c_str(),                  // lpFileName
                  GetDesiredAccessFlags(permission),  // dwDesiredAccess
                  GetShareFlags(permission),          // dwShareMode
                  nullptr,                            // lpSecurityAttributes  //
@@ -226,7 +244,7 @@ fml::UniqueFD OpenDirectory(const char* path,
   const DWORD flags = FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS;
 
   auto handle =
-      CreateFile(file_name.c_str(),                  // lpFileName
+      OpenWindowsFile(file_name.c_str(),                  // lpFileName
                  GetDesiredAccessFlags(permission),  // dwDesiredAccess
                  GetShareFlags(permission),          // dwShareMode
                  nullptr,                            // lpSecurityAttributes  //
@@ -265,11 +283,20 @@ fml::UniqueFD Duplicate(fml::UniqueFD::element_type descriptor) {
 }
 
 bool IsDirectory(const fml::UniqueFD& directory) {
+#if defined(FLUTTER_WINDOWS_PHONE)
+  FILE_ATTRIBUTE_TAG_INFO info = {};
+  if (!GetFileInformationByHandleEx(directory.get(), FileAttributeTagInfo,
+                                    &info, sizeof(info))) {
+    return false;
+  }
+  return (info.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+#else
   BY_HANDLE_FILE_INFORMATION info;
   if (!::GetFileInformationByHandle(directory.get(), &info)) {
     return false;
   }
   return info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY;
+#endif
 }
 
 bool IsDirectory(const fml::UniqueFD& base_directory, const char* path) {

@@ -232,6 +232,7 @@ class AndroidDevice extends Device {
       case TargetPlatform.tester:
       case TargetPlatform.web_javascript:
       case TargetPlatform.windows_x64:
+      case TargetPlatform.windows_arm:
       case TargetPlatform.windows_arm64:
       case TargetPlatform.unsupported:
         throw UnsupportedError('Invalid target platform for Android');
@@ -554,6 +555,7 @@ class AndroidDevice extends Device {
       case TargetPlatform.linux_x64:
       case TargetPlatform.tester:
       case TargetPlatform.web_javascript:
+      case TargetPlatform.windows_arm:
       case TargetPlatform.windows_arm64:
       case TargetPlatform.windows_x64:
       case TargetPlatform.unsupported:
