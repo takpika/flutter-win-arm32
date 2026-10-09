@@ -87,7 +87,8 @@ class FlutterWindowsView : public WindowBindingHandlerDelegate {
   // Callback for presenting a software bitmap.
   virtual bool PresentSoftwareBitmap(const void* allocation,
                                      size_t row_bytes,
-                                     size_t height);
+                                     size_t height,
+                                     bool top_down = true);
 
   // Creates a window metric for this view.
   //

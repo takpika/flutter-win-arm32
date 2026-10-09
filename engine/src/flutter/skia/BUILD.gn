@@ -34,6 +34,9 @@ config("skia_public") {
     "SK_CODEC_DECODES_WBMP",
   ]
   defines += flutter_defines
+  if (flutter_windows_phone) {
+    defines += [ "SK_WINUWP" ]
+  }
 
   cflags_objcc = []
   if (is_fuchsia || is_linux) {
@@ -463,6 +466,9 @@ optional("gpu") {
       sources += [
         "$_skia_root/src/gpu/ganesh/gl/iOS/GrGLMakeNativeInterface_iOS.cpp",
       ]
+    } else if (is_win && skia_gl_standard == "gles") {
+      sources +=
+          [ "$_skia_root/src/gpu/ganesh/gl/GrGLMakeNativeInterface_none.cpp" ]
     } else if (is_win) {
       sources += [
         "$_skia_root/src/gpu/ganesh/gl/win/GrGLMakeNativeInterface_win.cpp",
@@ -583,6 +589,10 @@ optional("png_encode") {
 
 optional("typeface_freetype") {
   enabled = skia_use_freetype
+  if (is_win) {
+    # Windows links the bundled FreeType dependency below, not a POSIX dlopen library.
+    defines = [ "SK_FREETYPE_MINIMUM_RUNTIME_VERSION_IS_BUILD_VERSION" ]
+  }
 
   public_defines = [ "SK_TYPEFACE_FACTORY_FREETYPE" ]
   deps = [ "//flutter/third_party/freetype2" ]
@@ -721,6 +731,9 @@ skia_component("skia") {
       "Ole32.lib",
       "OleAut32.lib",
     ]
+    if (flutter_windows_phone) {
+      libs += [ "Dwrite.lib" ]
+    }
 
     if (!skia_enable_winuwp) {
       libs += [

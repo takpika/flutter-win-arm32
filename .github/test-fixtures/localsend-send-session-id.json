@@ -1,0 +1,9 @@
+{
+  "applicationCommit": "5ccc6dea192d1c697c2602bf456b2eb2ad8e9674",
+  "path": "app/lib/provider/network/send_provider.dart",
+  "originalSha256": "ed56fe5c90a7b122cd847c9c63659b6d52ebfae28ed20c607eecff3fbb16298a",
+  "patchedSha256": "741533a6c4eb0d0604f527ec165379d19f4b8931eee74c2ed79173c55632c2b6",
+  "patchSha256": "4f500d109f8be5825e4e530efa195c1356badd23ddaac20fe31b383b30c74786",
+  "changedFiles": 1,
+  "changedLines": 2
+}

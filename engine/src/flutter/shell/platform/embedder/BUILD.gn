@@ -97,6 +97,17 @@ template("embedder_source_set") {
       "vsync_waiter_embedder.h",
     ]
 
+    if (!embedder_enable_software) {
+      sources -= [
+        "embedder_surface_software.cc",
+        "embedder_surface_software.h",
+      ]
+    }
+    if (flutter_windows_phone) {
+      sources +=
+          [ "//flutter/shell/platform/windows/uwp/compat/runtime_imports.c" ]
+    }
+
     public_deps = [ ":embedder_headers" ]
     deps = [
       ":embedder_gpu_configuration",
@@ -113,21 +124,26 @@ template("embedder_source_set") {
       "//flutter/skia",
       "//flutter/third_party/tonic",
     ]
+    if (flutter_windows_phone) {
+      deps +=
+          [ "//flutter/shell/platform/windows/uwp/compat:flutter_winrt_compat" ]
+    }
 
     if (embedder_enable_gl) {
+      configs += [ "//flutter/shell/platform/windows:relative_angle_headers" ]
       sources += [
         "embedder_external_texture_gl.cc",
         "embedder_external_texture_gl.h",
         "embedder_surface_gl_skia.cc",
         "embedder_surface_gl_skia.h",
       ]
+      deps += [ "//flutter/impeller/renderer/backend/gles" ]
 
       if (impeller_supports_rendering) {
         sources += [
           "embedder_surface_gl_impeller.cc",
           "embedder_surface_gl_impeller.h",
         ]
-        deps += [ "//flutter/impeller/renderer/backend/gles" ]
       }
     }
 
@@ -616,7 +632,7 @@ if (host_os == "linux" || host_os == "win" || is_android) {
         destination = "flutter_embedder.h"
       },
     ]
-    if (host_os == "linux" || is_android) {
+    if (is_linux || is_android) {
       files += [
         {
           source = "$root_out_dir/libflutter_engine.so"
@@ -624,7 +640,7 @@ if (host_os == "linux" || host_os == "win" || is_android) {
         },
       ]
     }
-    if (host_os == "win") {
+    if (is_win) {
       files += [
         {
           source = "$root_out_dir/flutter_engine.dll"

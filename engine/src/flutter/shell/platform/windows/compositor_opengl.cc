@@ -4,6 +4,8 @@
 
 #include "flutter/shell/platform/windows/compositor_opengl.h"
 
+#include <algorithm>
+
 #include "GLES3/gl3.h"
 #include "flutter/shell/platform/windows/flutter_windows_engine.h"
 #include "flutter/shell/platform/windows/flutter_windows_view.h"
@@ -172,6 +174,26 @@ bool CompositorOpenGL::Present(FlutterWindowsView* view,
   // See OpenGL specification version 4.6, section 18.3.1.
   gl_->Disable(GL_SCISSOR_TEST);
   gl_->BindFramebuffer(GL_READ_FRAMEBUFFER, source_id);
+
+#if defined(_M_ARM) || defined(__arm__)
+  const size_t width_px = static_cast<size_t>(width);
+  const size_t height_px = static_cast<size_t>(height);
+  const size_t row_bytes = width_px * 4;
+  const size_t buffer_size = row_bytes * height_px;
+  if (readback_buffer_.size() != buffer_size) {
+    readback_buffer_.resize(buffer_size);
+  }
+  gl_->ReadPixels(0, 0, width_px, height_px, format_.general_format,
+                  GL_UNSIGNED_BYTE, readback_buffer_.data());
+  // glReadPixels returns rows from OpenGL's lower-left origin. Present them as
+  // a bottom-up DIB so GDI does the orientation mapping without an extra copy.
+  if (!view->PresentSoftwareBitmap(readback_buffer_.data(), row_bytes,
+                                   height_px, false)) {
+    return false;
+  }
+  view->OnFramePresented();
+  return true;
+#else
   gl_->BindFramebuffer(GL_DRAW_FRAMEBUFFER, kWindowFrameBufferId);
 
   auto blitFramebuffer = GetBlitFramebufferProc(*gl_);
@@ -193,6 +215,7 @@ bool CompositorOpenGL::Present(FlutterWindowsView* view,
 
   view->OnFramePresented();
   return true;
+#endif
 }
 
 bool CompositorOpenGL::Initialize() {
@@ -221,11 +244,13 @@ bool CompositorOpenGL::Initialize() {
     format_.general_format = GL_RGBA;
   }
 
+#if !defined(_M_ARM) && !defined(__arm__)
   if (!gl_->BlitFramebuffer.IsAvailable() &&
       !gl_->BlitFramebufferANGLE.IsAvailable()) {
     FML_LOG(ERROR) << "Unable to find OpenGL blit framebuffer procedure.";
     return false;
   }
+#endif
 
   is_initialized_ = true;
   return true;
@@ -251,12 +276,25 @@ bool CompositorOpenGL::Clear(FlutterWindowsView* view) {
   gl_->ClearColor(0.0f, 0.0f, 0.0f, 0.0f);
   gl_->Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
+#if defined(_M_ARM) || defined(__arm__)
+  const auto width = surface->width();
+  const auto height = surface->height();
+  const size_t row_bytes = width * 4;
+  readback_buffer_.assign(row_bytes * height, 0);
+  if (!view->PresentSoftwareBitmap(readback_buffer_.data(), row_bytes,
+                                   height)) {
+    return false;
+  }
+  view->OnFramePresented();
+  return true;
+#else
   if (!surface->SwapBuffers()) {
     return false;
   }
 
   view->OnFramePresented();
   return true;
+#endif
 }
 
 }  // namespace flutter

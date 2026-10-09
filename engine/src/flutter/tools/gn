@@ -648,7 +648,7 @@ def to_gn_args(args):
   else:
     gn_args['skia_use_gl'] = args.target_os != 'fuchsia'
 
-  if sys.platform == 'darwin' and args.target_os not in ['android', 'fuchsia']:
+  if sys.platform == 'darwin' and args.target_os not in ['android', 'fuchsia', 'win']:
     # OpenGL is deprecated on macOS > 10.11.
     # This is not necessarily needed but enabling this until we have a way to
     # build a macOS metal only shell and a gl only shell.
@@ -972,7 +972,7 @@ def parse_args(args):
 
   parser.add_argument('--linux-cpu', type=str, choices=['x64', 'x86', 'arm64', 'arm'])
   parser.add_argument('--fuchsia-cpu', type=str, choices=['x64', 'arm64'], default='x64')
-  parser.add_argument('--windows-cpu', type=str, choices=['x64', 'arm64', 'x86'], default='x64')
+  parser.add_argument('--windows-cpu', type=str, choices=['x64', 'arm64', 'x86', 'arm'], default='x64')
   parser.add_argument('--simulator-cpu', type=str, choices=['x64', 'arm64'], default='x64')
   parser.add_argument('--arm-float-abi', type=str, choices=['hard', 'soft', 'softfp'])
 

@@ -21,7 +21,9 @@
 
 #if defined(OS_WIN)
 #include <BaseTsd.h>
+#if !defined(_SSIZE_T_DEFINED)
 typedef SSIZE_T ssize_t;
+#endif
 #endif
 
 #include "tonic/filesystem/filesystem/eintr_wrapper.h"

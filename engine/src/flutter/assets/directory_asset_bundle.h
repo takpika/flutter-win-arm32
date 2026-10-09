@@ -16,12 +16,19 @@ namespace flutter {
 class DirectoryAssetBundle : public AssetResolver {
  public:
   DirectoryAssetBundle(fml::UniqueFD descriptor,
-                       bool is_valid_after_asset_manager_change);
+                       bool is_valid_after_asset_manager_change
+#if defined(FLUTTER_WINDOWS_PHONE)
+                       , std::string absolute_assets_path = {}
+#endif
+                       );
 
   ~DirectoryAssetBundle() override;
 
  private:
   const fml::UniqueFD descriptor_;
+#if defined(FLUTTER_WINDOWS_PHONE)
+  const std::string absolute_assets_path_;
+#endif
   bool is_valid_ = false;
   bool is_valid_after_asset_manager_change_ = false;
 

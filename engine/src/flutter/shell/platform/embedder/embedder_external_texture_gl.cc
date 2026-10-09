@@ -69,7 +69,12 @@ sk_sp<DlImage> EmbedderExternalTextureGL::ResolveTexture(
     impeller::AiksContext* aiks_context,
     const SkISize& size) {
   if (!!aiks_context) {
+#if defined(IMPELLER_SUPPORTS_RENDERING) && IMPELLER_SUPPORTS_RENDERING
     return ResolveTextureImpeller(texture_id, aiks_context, size);
+#else
+    FML_LOG(ERROR) << "Impeller GL external textures are not enabled.";
+    return nullptr;
+#endif
   } else {
     return ResolveTextureSkia(texture_id, context, size);
   }
@@ -131,6 +136,7 @@ sk_sp<DlImage> EmbedderExternalTextureGL::ResolveTextureImpeller(
     int64_t texture_id,
     impeller::AiksContext* aiks_context,
     const SkISize& size) {
+#if defined(IMPELLER_SUPPORTS_RENDERING) && IMPELLER_SUPPORTS_RENDERING
   std::unique_ptr<FlutterOpenGLTexture> texture =
       external_texture_callback_(texture_id, size.width(), size.height());
 
@@ -167,6 +173,9 @@ sk_sp<DlImage> EmbedderExternalTextureGL::ResolveTextureImpeller(
   }
 
   return impeller::DlImageImpeller::Make(image);
+#else
+  return nullptr;
+#endif
 }
 
 // |flutter::Texture|

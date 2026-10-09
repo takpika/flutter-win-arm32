@@ -43,9 +43,16 @@ generated_file("artifacts_entitlement_config") {
 # Target-specific binaries such as gen_snapshot should be separated into a
 # separate archive target from host binaries such as flutter_tester.
 if (build_engine_artifacts) {
+  snapshot_target = "$dart_src/runtime/bin:gen_snapshot"
+  snapshot_output_dir = root_out_dir
+  if (target_os == "win" && target_cpu == "arm" &&
+      (host_os == "mac" || host_os == "linux")) {
+    snapshot_target += "($host_toolchain)"
+    snapshot_output_dir = get_label_info(snapshot_target, "root_out_dir")
+  }
   zip_bundle("artifacts") {
     deps = [
-      "$dart_src/runtime/bin:gen_snapshot",
+      snapshot_target,
       "//flutter/flutter_frontend_server:frontend_server",
       "//flutter/impeller/compiler:impellerc",
       "//flutter/impeller/tessellator:tessellator_shared",
@@ -80,7 +87,7 @@ if (build_engine_artifacts) {
     # gen_snapshot is bundled for all runtime modes.
     files = [
       {
-        source = "$root_out_dir/gen_snapshot$exe"
+        source = "$snapshot_output_dir/gen_snapshot$exe"
         destination = "gen_snapshot$exe"
       },
     ]

@@ -1,0 +1,149 @@
+{
+  "upstreamRevision": "e77ac8049afab1ed6dcd048a65c0e5c030293c84",
+  "patch": "clang-ms-inherited-constructor.patch",
+  "patchSha256": "b144f080cb507ee2f790892d3b6a1f5ef89d841ce3c2e0f358c53e73d06b69f6",
+  "files": [
+    {
+      "path": "clang/lib/Sema/SemaOverload.cpp",
+      "patchedSha256": "b559355b82f53e0fbcbc3a3ede17e2bfc19926cb2b8d701a6f54e7554d01167c",
+      "originalSha256": "6cdd5973176172d2482337cf142f10c5dd69f5ed4dfed66c2d22234150fc0351"
+    }
+  ],
+  "languageMode": "MSVC compatibility only",
+  "otherLanguageModesUnchanged": true,
+  "patches": [
+    {
+      "patch": "clang-ms-inherited-constructor.patch",
+      "patchSha256": "b144f080cb507ee2f790892d3b6a1f5ef89d841ce3c2e0f358c53e73d06b69f6",
+      "files": [
+        {
+          "path": "clang/lib/Sema/SemaOverload.cpp",
+          "patchedSha256": "b559355b82f53e0fbcbc3a3ede17e2bfc19926cb2b8d701a6f54e7554d01167c",
+          "originalSha256": "6cdd5973176172d2482337cf142f10c5dd69f5ed4dfed66c2d22234150fc0351"
+        }
+      ]
+    },
+    {
+      "patch": "clang-windows-arm32-seh.patch",
+      "patchSha256": "8f500466fb21a170986466a836a0c3bb051f2a65c6a52cd1e4cc6223146ab4dd",
+      "files": [
+        {
+          "path": "clang/lib/CodeGen/CGCleanup.cpp",
+          "originalSha256": "e46e0fa637947f8e8c731a24ab9be7b4bf2edf7478474c2b4ab12d2da027d377",
+          "patchedSha256": "ec813bae332a6931020f06079b5207dac96760b7c0ae670ebba939369a131f86"
+        },
+        {
+          "path": "clang/lib/CodeGen/CodeGenModule.cpp",
+          "originalSha256": "4eeeeea99e1e6f1ca59ef44951c47d7885d9f89af4549eada95bf49c84c9838a",
+          "patchedSha256": "827f4dfa266045d39a74c9f98cb42fc4dbb67c60eb07b7ff5cdb3fc268b4e431"
+        },
+        {
+          "path": "clang/lib/Driver/ToolChains/Clang.cpp",
+          "originalSha256": "9fff731e40dba042c5c048975a8b28474b0d2e6690d09680c4e88f121c97e4a3",
+          "patchedSha256": "a14cf750b82f6fd874f4a376501579118620b7d59e687fb7c3dbdd8e8353aca6"
+        },
+        {
+          "path": "clang/lib/Parse/ParsePragma.cpp",
+          "originalSha256": "dc1db1d95ab661110bc3d3728bc0f1f37a9a400b25b1081a4581a3fba6eb29cd",
+          "patchedSha256": "73a4abb7b38ea50276a79636134fd6ea108734557f3c37838184161b06411972"
+        },
+        {
+          "path": "llvm/lib/CodeGen/AsmPrinter/WinException.cpp",
+          "originalSha256": "7783353c7b55d5c4f1813d05214dc720fe48ed11a0303b4e4e5ffdd24ab12f0f",
+          "patchedSha256": "129c1715c185668a37418f0f0b41fdd2197788309bf35152650dc1e79f1c402e"
+        },
+        {
+          "path": "llvm/lib/Target/ARM/ARMAsmPrinter.cpp",
+          "originalSha256": "fac9cf52f276653f657f0a1a5e72e0131d7cf647b6e01b20304d1ff201690d24",
+          "patchedSha256": "b5588040e3fb2c0422938440c7f74e6ca8ebbdea4a7608c4196e7106e3a856e7"
+        },
+        {
+          "path": "llvm/lib/Target/ARM/ARMBaseRegisterInfo.cpp",
+          "originalSha256": "335a4c16f0242f7075b7669e153afa56284f0beda466cd794d4ceb1ddadab918",
+          "patchedSha256": "b70afee1f7cdc1cd7d827bc4dd4243e1967c48d3715e460c8c6d8135389cdf17"
+        },
+        {
+          "path": "llvm/lib/Target/ARM/ARMExpandPseudoInsts.cpp",
+          "originalSha256": "6a143aff348c9731bd802585a66fbbeb832035384805c043f05d208b5a46079f",
+          "patchedSha256": "4a6dd37e97aa170659ad903cb24ad3756bb739c49be11e3cdc57dbaed9fcc8c1"
+        },
+        {
+          "path": "llvm/lib/Target/ARM/ARMFrameLowering.cpp",
+          "originalSha256": "a89895676a066157e7146cb0a7b2efca63d632bf22be532665f5d4187829b902",
+          "patchedSha256": "229b83185c3fc1df02a5cb57a7d16394e493d2981af80063339c2d758c0e15c6"
+        },
+        {
+          "path": "llvm/lib/Target/ARM/ARMISelDAGToDAG.cpp",
+          "originalSha256": "488af3cc953d11b450acf68933a86b1c2582726ab39167b53463da604836655c",
+          "patchedSha256": "45cf7e412195029a56c2fcbae0e847c6cba904129c63831a62f3ad53166a3ac3"
+        },
+        {
+          "path": "llvm/lib/Target/ARM/ARMISelLowering.cpp",
+          "originalSha256": "aa4253b67519d8b8e808873e46c3a05cf9f7d5f63cbce7abbddc4b2507b3e88b",
+          "patchedSha256": "edb1e0ac1e1822fc52e137d0d68063471f40b532208ab56788f043043bc3e671"
+        },
+        {
+          "path": "llvm/lib/Target/ARM/ARMMCInstLower.cpp",
+          "originalSha256": "8df89b3c3f8cb4099e83e617f6ffd1be20f7dbd200c750f30cd1159f99e465b1",
+          "patchedSha256": "c28adaa81edd345bb9cd5eb95cd7627725ad26bea4d8e9df12c5c7f43feec888"
+        },
+        {
+          "path": "llvm/lib/Target/ARM/ARMInstrThumb.td",
+          "originalSha256": "b7f2ca1a81af8b358af5d416d5db7f7d61bc0a2d0489b5e45debd3f6ba83813a",
+          "patchedSha256": "55d58caa7434dc447c3c962d1698d82d1273dc855bceff0749b5171cde83263c"
+        },
+        {
+          "path": "clang/include/clang/Basic/TargetInfo.h",
+          "originalSha256": "697dc8f78959cd7e26e719c9ea906c303ee93f84398ea58f3460462a768455c1",
+          "patchedSha256": "ce1c7755afbb0ed6eb2361e72d59f86a652724a28707d6b7007b242e6e7944b7"
+        }
+      ]
+    },
+    {
+      "patch": "clang-ms-anonymous-function-diagnostic.patch",
+      "patchSha256": "ecde814377599b75137591c8e9cd123134537dd8d95f3ce6c248bb2688945b6f",
+      "files": [
+        {
+          "path": "clang/lib/Sema/Sema.cpp",
+          "originalSha256": "c4b7693f37a5015279971b9c2ea8e84217bdad1ef616bf410cce8731a816ac4a",
+          "patchedSha256": "af945b798c20998d7104ce5ab0d3faf212be5c7fa782a565e87288c2838168e1"
+        }
+      ]
+    },
+    {
+      "patch": "lld-windows-arm32-forwarder-rva.patch",
+      "patchSha256": "896ac78fe302f2b89259230e762d50b24832c4531547c6fc81221b5cc45a8f27",
+      "files": [
+        {
+          "path": "lld/COFF/DLL.cpp",
+          "originalSha256": "34dbfb0bd626989e9326adeaeb95a0e8007ec3978f742ebc1c58096d2fe27301",
+          "patchedSha256": "749fd39c9797f386e68635f440d0ca84765c7d86ab549a8b5c7d7c91d165422a"
+        },
+        {
+          "path": "lld/test/COFF/export-armnt.yaml",
+          "originalSha256": "a93db1a8dbe64f1ec3732b3ed5e46b94a329744e22af8f7c29488388c142d81d",
+          "patchedSha256": "3a995da8b734c865603d1352a54f3b117ddd3a3788ea02b878138d5eecb463d0"
+        }
+      ],
+      "scope": "COFF forwarder export RVAs are strings and never get the ARM Thumb code-address bit; direct function/data exports and other machines retain their existing values."
+    },
+    {
+      "patch": "clang-ms-conversion-diagnostics.patch",
+      "patchSha256": "ca8910cc9e79652294a5f31da14415d4f8b3224fe4f453e4f6deb4fc10e4922c",
+      "files": [
+        {
+          "path": "clang/lib/Sema/SemaChecking.cpp",
+          "originalSha256": "0856769c922b59b8286109f92167067489fa5230bdda10f7ae8fb4274252ceac",
+          "patchedSha256": "d87f1efa1536edf1465098aa7c433a958f9b2e85129973792ff93c11a7bfab1c"
+        },
+        {
+          "path": "clang/include/clang/Sema/Sema.h",
+          "originalSha256": "3cbc268ca1d91a4aaa941d126614b76b813a4abea27871db76000cf25f158362",
+          "patchedSha256": "e3ce58cf1c2185860197860028bec3bf0b074426c05f10a241a53d2b3448f1af"
+        }
+      ]
+    }
+  ],
+  "arm32WindowsSehRuntimeEvidence": "Validated on Windows RT hardware; compiler fixtures in toolchain/tests",
+  "allTargetsCleanBuildVerified": false
+}

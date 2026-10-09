@@ -156,6 +156,7 @@ TargetPlatform? _mapTargetPlatform(TargetPlatform? targetPlatform) {
     case TargetPlatform.linux_x64:
     case TargetPlatform.linux_arm64:
     case TargetPlatform.windows_x64:
+    case TargetPlatform.windows_arm:
     case TargetPlatform.windows_arm64:
     case TargetPlatform.fuchsia_arm64:
     case TargetPlatform.fuchsia_x64:
@@ -520,6 +521,7 @@ class CachedArtifacts implements Artifacts {
       case TargetPlatform.linux_x64:
       case TargetPlatform.linux_arm64:
       case TargetPlatform.windows_x64:
+      case TargetPlatform.windows_arm:
       case TargetPlatform.windows_arm64:
         return _getDesktopArtifactPath(artifact, platform!, mode);
       case TargetPlatform.fuchsia_arm64:
@@ -547,6 +549,9 @@ class CachedArtifacts implements Artifacts {
     // When platform is null, a generic host platform artifact is being requested
     // and not the gen_snapshot for darwin as a target platform.
     final String engineDir = _getEngineArtifactsPath(platform, mode)!;
+    if (platform == TargetPlatform.windows_arm && artifact == Artifact.flutterPatchedSdkPath) {
+      return _fileSystem.path.join(engineDir, 'flutter_patched_sdk');
+    }
     switch (artifact) {
       case Artifact.genSnapshot:
       case Artifact.genSnapshotArm64:
@@ -880,6 +885,7 @@ class CachedArtifacts implements Artifacts {
       case TargetPlatform.linux_arm64:
       case TargetPlatform.darwin:
       case TargetPlatform.windows_x64:
+      case TargetPlatform.windows_arm:
       case TargetPlatform.windows_arm64:
         // TODO(zanderso): remove once debug desktop artifacts are uploaded
         // under a separate directory from the host artifacts.
@@ -1346,6 +1352,7 @@ class CachedLocalEngineArtifacts implements Artifacts {
         return 'windows-x64';
       case TargetPlatform.windows_arm64:
         return 'windows-arm64';
+      case TargetPlatform.windows_arm:
       case TargetPlatform.ios:
       case TargetPlatform.android:
       case TargetPlatform.android_arm:
@@ -1576,6 +1583,7 @@ class CachedLocalWebSdkArtifacts implements Artifacts {
         return 'windows-x64';
       case TargetPlatform.windows_arm64:
         return 'windows-arm64';
+      case TargetPlatform.windows_arm:
       case TargetPlatform.ios:
       case TargetPlatform.android:
       case TargetPlatform.android_arm:

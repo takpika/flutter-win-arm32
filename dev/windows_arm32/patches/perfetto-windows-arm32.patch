@@ -1,0 +1,190 @@
+diff --git a/include/perfetto/ext/base/sys_types.h b/include/perfetto/ext/base/sys_types.h
+index 999a152..48405a7 100644
+--- a/include/perfetto/ext/base/sys_types.h
++++ b/include/perfetto/ext/base/sys_types.h
+@@ -26,6 +26,11 @@
+ 
+ #if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+ 
++#if defined(__MINGW32__)
++// LLVM-MinGW supplies pid_t and ssize_t, but not uid_t.
++using uid_t = unsigned int;
++#else
++
+ #if !PERFETTO_BUILDFLAG(PERFETTO_COMPILER_GCC)
+ // MinGW has these. clang-cl and MSVC, which use just the Windows SDK, don't.
+ using uid_t = unsigned int;
+@@ -38,6 +43,8 @@ using ssize_t = int64_t;
+ using ssize_t = long;
+ #endif  // _WIN64
+ 
++#endif  // LLVM-MinGW
++
+ #endif  // OS_WIN
+ 
+ namespace perfetto {
+diff --git a/src/base/paged_memory.cc b/src/base/paged_memory.cc
+index 957a2dd..ab5c757 100644
+--- a/src/base/paged_memory.cc
++++ b/src/base/paged_memory.cc
+@@ -33,6 +33,18 @@
+ namespace perfetto {
+ namespace base {
+ 
++#if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
++static void* AllocateWindowsPages(void* address, SIZE_T size, DWORD allocation,
++                                 DWORD protection) {
++#if defined(FLUTTER_WINDOWS_PHONE)
++  return VirtualAllocFromApp(address, size, allocation, protection);
++#else
++  return VirtualAlloc(address, size, allocation, protection);
++#endif
++}
++#endif
++
++
+ namespace {
+ 
+ #if TRACK_COMMITTED_SIZE()
+@@ -56,7 +68,7 @@ PagedMemory PagedMemory::Allocate(size_t req_size, int flags) {
+   PERFETTO_CHECK(rounded_up_size >= req_size);
+   size_t outer_size = rounded_up_size + GuardSize() * 2;
+ #if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+-  void* ptr = VirtualAlloc(nullptr, outer_size, MEM_RESERVE, PAGE_NOACCESS);
++  void* ptr = AllocateWindowsPages(nullptr, outer_size, MEM_RESERVE, PAGE_NOACCESS);
+   if (!ptr && (flags & kMayFail))
+     return PagedMemory();
+   PERFETTO_CHECK(ptr);
+@@ -151,7 +163,7 @@ void PagedMemory::EnsureCommitted(size_t committed_size) {
+   // Don't commit more than the total size.
+   size_t commit_size = std::min(num_additional_chunks * kCommitChunkSize,
+                                 size_ - committed_size_);
+-  void* res = VirtualAlloc(p_ + committed_size_, commit_size, MEM_COMMIT,
++  void* res = AllocateWindowsPages(p_ + committed_size_, commit_size, MEM_COMMIT,
+                            PAGE_READWRITE);
+   PERFETTO_CHECK(res);
+   ANNOTATE_CHANGE_SIZE(p_, size_, committed_size_,
+diff --git a/src/base/temp_file.cc b/src/base/temp_file.cc
+index 26092d3..257df51 100644
+--- a/src/base/temp_file.cc
++++ b/src/base/temp_file.cc
+@@ -52,11 +52,20 @@ std::string GetTempFilePathWin() {
+ std::string GetSysTempDir() {
+   const char* tmpdir = nullptr;
+ #if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
++#if defined(FLUTTER_WINDOWS_PHONE)
++  wchar_t wide_path[MAX_PATH];
++  DWORD size = GetTempPathW(MAX_PATH, wide_path);
++  PERFETTO_CHECK(size > 0 && size < MAX_PATH);
++  std::string path;
++  PERFETTO_CHECK(WideToUTF8(std::wstring(wide_path, size), path));
++  return StripSuffix(path, "\\");
++#else
+   if ((tmpdir = getenv("TMP")))
+     return tmpdir;
+   if ((tmpdir = getenv("TEMP")))
+     return tmpdir;
+   return "C:\\TEMP";
++#endif
+ #else
+   if ((tmpdir = getenv("TMPDIR")))
+     return base::StripSuffix(tmpdir, "/");
+@@ -77,10 +86,21 @@ TempFile TempFile::Create() {
+   // that requires FILE_SHARE_READ. FILE_SHARE_READ is NOT settable when using
+   // the POSIX-compat equivalent function _open(). Hence the CreateFileA +
+   // _open_osfhandle dance here.
++#if defined(FLUTTER_WINDOWS_PHONE)
++  std::wstring wide_path;
++  PERFETTO_CHECK(UTF8ToWide(temp_file.path_, wide_path));
++  CREATEFILE2_EXTENDED_PARAMETERS parameters = {};
++  parameters.dwSize = sizeof(parameters);
++  parameters.dwFileAttributes = FILE_ATTRIBUTE_TEMPORARY;
++  HANDLE h = ::CreateFile2(wide_path.c_str(), GENERIC_READ | GENERIC_WRITE,
++                          FILE_SHARE_DELETE | FILE_SHARE_READ, CREATE_ALWAYS,
++                          &parameters);
++#else
+   HANDLE h =
+       ::CreateFileA(temp_file.path_.c_str(), GENERIC_READ | GENERIC_WRITE,
+                     FILE_SHARE_DELETE | FILE_SHARE_READ, nullptr, CREATE_ALWAYS,
+                     FILE_ATTRIBUTE_TEMPORARY, nullptr);
++#endif
+   PERFETTO_CHECK(PlatformHandleChecker::IsValid(h));
+   // According to MSDN, when using _open_osfhandle the caller must not call
+   // CloseHandle(). Ownership is moved to the file descriptor, which then needs
+@@ -120,7 +140,13 @@ void TempFile::Unlink() {
+ #if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+   // If the FD is still open DeleteFile will mark the file as pending deletion
+   // and delete it only when the process exists.
++#if defined(FLUTTER_WINDOWS_PHONE)
++  std::wstring wide_path;
++  PERFETTO_CHECK(UTF8ToWide(path_, wide_path));
++  PERFETTO_CHECK(DeleteFileW(wide_path.c_str()));
++#else
+   PERFETTO_CHECK(DeleteFileA(path_.c_str()));
++#endif
+ #else
+   PERFETTO_CHECK(unlink(path_.c_str()) == 0);
+ #endif
+@@ -135,7 +161,13 @@ TempDir TempDir::Create() {
+   TempDir temp_dir;
+ #if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+   temp_dir.path_ = GetTempFilePathWin();
++#if defined(FLUTTER_WINDOWS_PHONE)
++  std::wstring wide_path;
++  PERFETTO_CHECK(UTF8ToWide(temp_dir.path_, wide_path));
++  PERFETTO_CHECK(CreateDirectoryW(wide_path.c_str(), nullptr));
++#else
+   PERFETTO_CHECK(_mkdir(temp_dir.path_.c_str()) == 0);
++#endif
+ #else
+   temp_dir.path_ = GetSysTempDir() + "/perfetto-XXXXXXXX";
+   PERFETTO_CHECK(mkdtemp(&temp_dir.path_[0]));
+@@ -150,7 +182,13 @@ TempDir& TempDir::operator=(TempDir&&) = default;
+ TempDir::~TempDir() {
+   if (path_.empty())
+     return;  // For objects that get std::move()d.
++#if defined(FLUTTER_WINDOWS_PHONE)
++  std::wstring wide_path;
++  PERFETTO_CHECK(UTF8ToWide(path_, wide_path));
++  PERFETTO_CHECK(RemoveDirectoryW(wide_path.c_str()));
++#else
+   PERFETTO_CHECK(Rmdir(path_));
++#endif
+ }
+ 
+ }  // namespace base
+diff --git a/src/base/thread_utils.cc b/src/base/thread_utils.cc
+index f0c4e35..262c8b0 100644
+--- a/src/base/thread_utils.cc
++++ b/src/base/thread_utils.cc
+@@ -53,11 +53,20 @@ typedef HRESULT(WINAPI* SetThreadDescription)(HANDLE hThread,
+ typedef HRESULT(WINAPI* GetThreadDescription)(HANDLE hThread,
+                                               PWSTR* ppszThreadDescription);
+ 
++static HMODULE KernelModule() {
++#if defined(FLUTTER_WINDOWS_PHONE)
++  static HMODULE module = ::LoadPackagedLibrary(L"kernel32.dll", 0);
++  return module;
++#else
++  return ::GetModuleHandle(L"Kernel32.dll");
++#endif
++}
++
+ bool MaybeSetThreadName(const std::string& name) {
+   // The SetThreadDescription API works even if no debugger is attached.
+   static auto set_thread_description_func =
+       reinterpret_cast<SetThreadDescription>(::GetProcAddress(
+-          ::GetModuleHandle(L"Kernel32.dll"), "SetThreadDescription"));
++          KernelModule(), "SetThreadDescription"));
+   if (!set_thread_description_func) {
+     return false;
+   }
+@@ -73,7 +82,7 @@ bool MaybeSetThreadName(const std::string& name) {
+ bool GetThreadName(std::string& out_result) {
+   static auto get_thread_description_func =
+       reinterpret_cast<GetThreadDescription>(::GetProcAddress(
+-          ::GetModuleHandle(L"Kernel32.dll"), "GetThreadDescription"));
++          KernelModule(), "GetThreadDescription"));
+   if (!get_thread_description_func) {
+     return false;
+   }

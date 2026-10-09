@@ -2,6 +2,14 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+# The Phone build is opt-in; Windows RT keeps its existing SDK and API family.
+declare_args() {
+  flutter_windows_phone = false
+  flutter_phone_tool = ""
+  # Optional host-side compiler driver; does not select Phone APIs.
+  flutter_windows_arm32_tool = ""
+}
+
 # =============================================================================
 # PLATFORM SELECTION
 # =============================================================================
@@ -557,8 +565,23 @@ if (custom_toolchain != "") {
   set_default_toolchain("//build/toolchain/custom")
 } else if (is_win) {
   assert(is_clang)
-  host_toolchain = "//build/toolchain/win:clang_$host_cpu"
-  set_default_toolchain("//build/toolchain/win:clang_$current_cpu")
+  if (host_os == "mac") {
+    host_toolchain = "//build/toolchain/mac:clang_$host_cpu"
+  } else if (host_os == "linux" &&
+             (flutter_windows_phone || flutter_windows_arm32_tool != "")) {
+    host_toolchain = "//build/toolchain/linux:clang_$host_cpu"
+  } else {
+    host_toolchain = "//build/toolchain/win:clang_$host_cpu"
+  }
+  if (flutter_windows_phone) {
+    assert((host_os == "mac" || host_os == "linux") && current_cpu == "arm")
+    set_default_toolchain("//build/toolchain/phone:arm")
+  } else if (flutter_windows_arm32_tool != "") {
+    assert((host_os == "mac" || host_os == "linux") && current_cpu == "arm")
+    set_default_toolchain("//build/toolchain/windows_arm32:arm")
+  } else {
+    set_default_toolchain("//build/toolchain/win:clang_$current_cpu")
+  }
 } else if (is_android) {
   if (host_os == "linux") {
     # Use clang for the x86/64 Linux host builds.

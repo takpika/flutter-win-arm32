@@ -28,7 +28,7 @@ declare_args() {
                     "environment.x64",
                   ],
                   "scope")
-  if (target_cpu == "arm64" || host_cpu == "arm64") {
+  if (target_cpu == "arm64" || target_cpu == "arm" || host_cpu == "arm64") {
     win_toolchain_data_arm64 =
         exec_script("//build/toolchain/win/setup_toolchain.py",
                     [

@@ -1,0 +1,137 @@
+name: Windows ARM32 source compiler
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - dev/windows_arm32/toolchain/**
+      - .github/workflows/windows-arm32-compiler.yml
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+jobs:
+  compiler:
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    timeout-minutes: 360
+    steps:
+      - name: Prepare Ubuntu amd64 container dependencies
+        run: |
+          test "$(uname -m)" = x86_64
+          mkdir -p "$GITHUB_WORKSPACE/_work/tmp"
+          export TMPDIR="$GITHUB_WORKSPACE/_work/tmp"
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential clang cmake ninja-build \
+            git curl ca-certificates python3 python3-pip python3-venv pkg-config \
+            zip unzip xz-utils zstd patchelf libxml2-dev libzstd-dev zlib1g-dev \
+            libssl-dev liblzma-dev libcurl4-openssl-dev libncurses-dev gh
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: llvm/llvm-project
+          ref: e77ac8049afab1ed6dcd048a65c0e5c030293c84
+          path: _work/llvm-project
+          persist-credentials: false
+          sparse-checkout: |
+            clang
+            cmake
+            lld
+            libunwind
+            llvm
+            third-party
+      - name: Prepare compiler dependencies
+        run: test -f /usr/share/doc/libzstd-dev/copyright
+      - name: Build compiler and LLVM tools from pinned source
+        run: |
+          python3 dev/windows_arm32/toolchain/build_compiler.py _work/llvm-project \
+            --output _work/compiler --jobs 2 \
+            --dependency-prefix /usr
+      - name: Check standard and MSVC language modes
+        run: |
+          for standard in 17 20; do
+            for mode in standard ms; do
+              flags=()
+              if [[ "$mode" == ms ]]; then flags+=(-fms-compatibility); fi
+              _work/compiler/bin/clang -cc1 -std=c++$standard \
+                -verify=$mode -verify-ignore-unexpected=note "${flags[@]}" \
+                dev/windows_arm32/toolchain/tests/ms_inherited_constructor.cpp
+            done
+          done
+      - name: Fetch pinned Windows GNU headers and libraries
+        run: |
+          archive=llvm-mingw-20251104-ucrt-ubuntu-22.04-x86_64.tar.xz
+          curl --fail --location --retry 3 \
+            "https://github.com/mstorsjo/llvm-mingw/releases/download/20251104/$archive" \
+            --output "_work/$archive"
+          echo "3aed6fa47be909884cb3e5634d6b7254604d7104832d6312f8435fb23d5a9bab  _work/$archive" \
+            | sha256sum --check
+          tar -xf "_work/$archive" -C _work
+      - name: Check unchanged Flutter C++ value types with Windows headers
+        run: |
+          python3 dev/windows_arm32/toolchain/check_compiler.py _work/compiler/bin/clang \
+            --sysroot _work/llvm-mingw-20251104-ucrt-ubuntu-22.04-x86_64 \
+            --engine engine/src/flutter
+      - name: Check COFF code, data and forwarder exports
+        run: |
+          python3 dev/windows_arm32/toolchain/check_linker.py \
+            --llvm-bin _work/compiler/bin --output _work/linker-check
+      - name: Prepare pinned Phone SDK headers
+        run: |
+          python3 dev/windows_arm32/toolchain/prepare_windows_sdk.py \
+            --output _work/windows-sdk
+      - name: Check DirectWrite declaration and COM ABI compatibility
+        run: |
+          python3 - <<'PY'
+          import json
+          import subprocess
+          from pathlib import Path
+          work = Path('_work').resolve()
+          resource = Path(subprocess.check_output(
+              [str(work / 'compiler/bin/clang'), '-print-resource-dir'],
+              text=True).strip()).resolve()
+          if not resource.is_relative_to(work / 'compiler') or not (resource / 'include/stddef.h').is_file():
+              raise SystemExit('Missing source-built Clang resource headers')
+          configuration = {
+              'compiler': str(work / 'compiler/bin/clang'),
+              'llvmBin': str(work / 'compiler/bin'),
+              'sysroot': str(work / 'llvm-mingw-20251104-ucrt-ubuntu-22.04-x86_64'),
+              'resourceDir': str(resource),
+              'systemIncludeDirs': [str(work / 'windows-sdk/include')],
+          }
+          (work / 'toolchain.json').write_text(json.dumps(configuration) + '\n')
+          PY
+          python3 dev/windows_arm32/toolchain/check_sdk_headers.py \
+            --toolchain-config _work/toolchain.json --output _work/sdk-header-check
+      - name: Package source-built tools and license
+        run: |
+          python3 dev/windows_arm32/toolchain/package_compiler.py \
+            --source _work/compiler --architecture x86_64 \
+            --zstd-prefix /usr \
+            --output _work/windows-arm32-compiler-linux-x64.tar.gz
+      - name: Verify the extracted compiler distribution
+        run: |
+          mkdir -p _work/distribution-check
+          tar -xzf _work/windows-arm32-compiler-linux-x64.tar.gz -C _work/distribution-check
+          _work/distribution-check/bin/clang --version
+          _work/distribution-check/bin/llvm-mc --version
+          python3 dev/windows_arm32/toolchain/check_compiler.py _work/distribution-check/bin/clang \
+            --sysroot _work/llvm-mingw-20251104-ucrt-ubuntu-22.04-x86_64 \
+            --engine engine/src/flutter --output _work/distribution-compiler-check
+          python3 dev/windows_arm32/toolchain/check_linker.py \
+            --llvm-bin _work/distribution-check/bin --output _work/distribution-linker-check
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-arm32-compiler-linux-x64
+          path: |
+            _work/windows-arm32-compiler-linux-x64.tar.gz
+            _work/windows-arm32-compiler-linux-x64.tar.gz.sha256
+          if-no-files-found: error

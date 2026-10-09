@@ -12,6 +12,9 @@
 #include "third_party/skia/include/core/SkStream.h"
 #include "third_party/skia/include/core/SkString.h"
 #include "third_party/skia/include/core/SkTypeface.h"
+#if defined(_WIN32) && (defined(_M_ARM) || defined(__arm__))
+#include "third_party/skia/include/ports/SkFontMgr_empty.h"
+#endif
 #include "txt/platform.h"
 
 namespace flutter {
@@ -121,6 +124,12 @@ auto AssetManagerFontStyleSet::createTypeface(int i) -> CreateTypefaceRet {
     sk_sp<SkFontMgr> font_mgr = txt::GetDefaultFontManager();
     // Ownership of the stream is transferred.
     asset.typeface = font_mgr->makeFromStream(std::move(stream));
+#if defined(_WIN32) && (defined(_M_ARM) || defined(__arm__))
+    if (!asset.typeface) {
+      static sk_sp<SkFontMgr> fallback_font_mgr = SkFontMgr_New_Custom_Empty();
+      asset.typeface = fallback_font_mgr->makeFromData(asset_data);
+    }
+#endif
     if (!asset.typeface) {
       FML_DLOG(ERROR) << "Unable to load font asset for family: "
                       << family_name_;

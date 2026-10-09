@@ -1,0 +1,25 @@
+{
+  "upstreamRevision": "13ce0c9e13b0940d2476cd0cff2301708a9a2e2b",
+  "files": [
+    {
+      "path": "include/perfetto/ext/base/sys_types.h",
+      "originalSha256": "748b81773bdbb52b8ca7a689a76b2294afdb740f6f05c66bce0b0c27bf183d23",
+      "patchedSha256": "7085e14bbf2d487148697f6f6ccc4d910a26bf9300d4f73af58a74f24cb97448"
+    },
+    {
+      "path": "src/base/paged_memory.cc",
+      "originalSha256": "dd8a6385576faf29b21d83172162bb1f0c22e3e282bd30944302858a5f40ba87",
+      "patchedSha256": "6157dbf9130c729995c8ae949088e7711725fb5e6bfee56498e38eb62260d82a"
+    },
+    {
+      "path": "src/base/temp_file.cc",
+      "originalSha256": "5f6fe26afe90ff7928c5ceda5895cdc67eba65dad77d21b21e7f752b141f6062",
+      "patchedSha256": "15ad1f95a558a5ed5aebc0f0a0e91deb59e52f9d4fbac755180781976e0c8bae"
+    },
+    {
+      "path": "src/base/thread_utils.cc",
+      "originalSha256": "9dfbcf7cb085905f67038a405b6cfe1c601fc28885a0c544da4c6f8b003bd123",
+      "patchedSha256": "1f382c56c1b1ca7169c0058ce20e7bbc0301082895017326c875e4935b44e817"
+    }
+  ]
+}

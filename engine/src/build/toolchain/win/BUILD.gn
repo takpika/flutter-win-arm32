@@ -312,8 +312,8 @@ if (target_cpu == "x64") {
 }
 
 if (target_cpu == "arm") {
-  # When the target cpu is "arm", we use the 32-bit intel toolchain "x86".
-  win_toolchains("x86") {
+  # When the target cpu is "arm", emit a clang_arm label backed by x86 host tools.
+  win_toolchains("arm") {
     toolchain_arch = "x86"
   }
 }

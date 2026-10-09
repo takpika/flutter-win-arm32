@@ -1,0 +1,26 @@
+{
+  "versions": {
+    "1.93.1": {
+      "patch": "rust193-backtrace-arm-abi.patch",
+      "patchSha256": "8b3401bda0d3877a7d6eeda674a901b2660e26898f98036f2652ddede7323edd",
+      "files": [
+        {
+          "path": "backtrace/src/dbghelp.rs",
+          "originalSha256": "830f8f5eef091eb26d59ce3bb62f8df5a331044181412ae316089bd56b39f076",
+          "patchedSha256": "8aa0b789012764c0cefc3313ed2a151bd8047b6e25ff9b9d16dc6f14921dacb4"
+        }
+      ]
+    },
+    "1.95.0": {
+      "patch": "rust195-stdlib-intrinsics-binding.patch",
+      "patchSha256": "4777f286875ba8e324f784280744bfb19f31c29a6ddc36399c6dbb27d91e8477",
+      "files": [
+        {
+          "path": "Cargo.toml",
+          "originalSha256": "d1c133e6fa50400a81cd4342658596d7dfdff18e5d0cacd3d31b69e8991ee451",
+          "patchedSha256": "8f176057521acc6c7ad533c810bd19b36f83308a26798acf9cb0a7ba19cb1656"
+        }
+      ]
+    }
+  }
+}

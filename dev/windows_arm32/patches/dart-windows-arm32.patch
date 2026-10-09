@@ -1,0 +1,2517 @@
+diff --git a/pkg/vm/lib/modular/transformations/ffi/abi.dart b/pkg/vm/lib/modular/transformations/ffi/abi.dart
+index 64cf9c09..a95bb3c1 100644
+--- a/pkg/vm/lib/modular/transformations/ffi/abi.dart
++++ b/pkg/vm/lib/modular/transformations/ffi/abi.dart
+@@ -106,7 +106,10 @@ class Abi {
+   /// The application binary interface for Windows on the X64 architecture.
+   static const windowsX64 = _windowsX64;
+ 
+-  /// The ABIs that the DartVM can run on, sorted alphabetically.
++  /// The application binary interface for Windows on 32-bit Arm.
++  static const windowsArm = _windowsArm;
++
++  /// The ABIs that the DartVM can run on, in stable VM index order.
+   ///
+   /// Does not contain macosIA32, we stopped supporting it.
+   /// https://github.com/dart-lang/sdk/issues/39810
+@@ -137,6 +140,8 @@ class Abi {
+     windowsArm64,
+     windowsIA32,
+     windowsX64,
++    // Keep existing indexes stable; Windows ARM32 is appended.
++    windowsArm,
+   ];
+ 
+   /// A string representation of this ABI.
+@@ -181,6 +186,7 @@ class Abi {
+   static const _windowsArm64 = Abi._(_Architecture.arm64, _OS.windows);
+   static const _windowsIA32 = Abi._(_Architecture.ia32, _OS.windows);
+   static const _windowsX64 = Abi._(_Architecture.x64, _OS.windows);
++  static const _windowsArm = Abi._(_Architecture.arm, _OS.windows);
+ }
+ 
+ // Keep consistent with sdk/lib/ffi/abi.dart.
+@@ -207,6 +213,7 @@ const Map<Abi, String> abiNames = {
+   Abi.windowsArm64: 'windowsArm64',
+   Abi.windowsIA32: 'windowsIA32',
+   Abi.windowsX64: 'windowsX64',
++  Abi.windowsArm: 'windowsArm',
+ };
+ 
+ /// The size of integer registers and memory addresses in bytes per [Abi].
+@@ -255,6 +262,7 @@ const Map<Abi, Map<NativeType, int>> nonSizeAlignment = {
+   Abi.linuxArm: _wordSize32Align64,
+   Abi.linuxRiscv32: _wordSize32Align64,
+   Abi.windowsIA32: _wordSize32Align64,
++  Abi.windowsArm: _wordSize32Align64,
+ };
+ 
+ // All 64 bit ABIs align struct fields to their size.
+diff --git a/runtime/BUILD.gn b/runtime/BUILD.gn
+index dfa1dbc8..65174b54 100644
+--- a/runtime/BUILD.gn
++++ b/runtime/BUILD.gn
+@@ -137,6 +137,9 @@ config("dart_os_config") {
+     defines += [ "DART_TARGET_OS_MACOS" ]
+   } else if (target_os == "win") {
+     defines += [ "DART_TARGET_OS_WINDOWS" ]
++    if (flutter_windows_phone) {
++      defines += [ "DART_TARGET_OS_WINDOWS_UWP" ]
++    }
+   } else if (target_os == "winuwp") {
+     defines += [
+       "DART_TARGET_OS_WINDOWS",
+diff --git a/runtime/bin/BUILD.gn b/runtime/bin/BUILD.gn
+index cfb5ede9..f658027d 100644
+--- a/runtime/bin/BUILD.gn
++++ b/runtime/bin/BUILD.gn
+@@ -58,6 +58,11 @@ template("build_libdart_builtin") {
+   source_set(target_name) {
+     configs += [ "..:dart_config" ] + extra_configs
+     public_configs = [ ":libdart_builtin_config" ]
++    if (flutter_windows_phone && is_mac) {
++      # Xcode 27 deprecates upstream readdir_r in the host snapshot tool.
++      # Keep the warning visible; the Phone and existing RT targets are unaffected.
++      cflags = [ "-Wno-error=deprecated-declarations" ]
++    }
+     deps = []
+     if (is_fuchsia) {
+       deps += [ "$fuchsia_sdk/fidl/fuchsia.io" ]
+diff --git a/runtime/bin/console_win.cc b/runtime/bin/console_win.cc
+index 03d8fb9f..82e1657f 100644
+--- a/runtime/bin/console_win.cc
++++ b/runtime/bin/console_win.cc
+@@ -21,6 +21,11 @@
+ namespace dart {
+ namespace bin {
+ 
++#if defined(DART_TARGET_OS_WINDOWS_UWP)
++// A CoreWindow app has no console configuration to save or restore.
++void Console::SaveConfig() {}
++void Console::RestoreConfig() {}
++#else
+ class ConsoleWin {
+  public:
+   static constexpr int kInvalidFlag = -1;
+@@ -153,6 +158,8 @@ void Console::RestoreConfig() {
+   ConsoleWin::Cleanup();
+ }
+ 
++#endif  // DART_TARGET_OS_WINDOWS_UWP
++
+ }  // namespace bin
+ }  // namespace dart
+ 
+diff --git a/runtime/bin/directory_win.cc b/runtime/bin/directory_win.cc
+index 460ae694..0385c989 100644
+--- a/runtime/bin/directory_win.cc
++++ b/runtime/bin/directory_win.cc
+@@ -9,6 +9,9 @@
+ 
+ #include <errno.h>     // NOLINT
+ #include <sys/stat.h>  // NOLINT
++#if defined(FLUTTER_WINDOWS_PHONE)
++#include <string>
++#endif
+ 
+ #include "bin/crypto.h"
+ #include "bin/dartutils.h"
+@@ -25,6 +28,50 @@
+ namespace dart {
+ namespace bin {
+ 
++#if defined(FLUTTER_WINDOWS_PHONE)
++extern "C" __declspec(dllimport) HRESULT WINAPI FlutterWinRTDirectoryAttributes(LPCWSTR, DWORD*);
++extern "C" __declspec(dllimport) HRESULT WINAPI FlutterWinRTCreateDirectory(LPCWSTR);
++extern "C" __declspec(dllimport) HRESULT WINAPI FlutterWinRTDirectoryOpen(LPCWSTR, void**);
++extern "C" __declspec(dllimport) HRESULT WINAPI FlutterWinRTDirectoryNext(void*, wchar_t*, UINT32, DWORD*, BOOL*);
++extern "C" __declspec(dllimport) HRESULT WINAPI FlutterWinRTDirectoryClose(void*);
++static DWORD StorageDirectoryAttributes(const wchar_t* path) {
++  DWORD attributes = GetFileAttributesW(path);
++  if (attributes == INVALID_FILE_ATTRIBUTES && GetLastError() == ERROR_ACCESS_DENIED) {
++    HRESULT hr = FlutterWinRTDirectoryAttributes(path, &attributes);
++    if (FAILED(hr)) SetLastError(HRESULT_FACILITY(hr) == FACILITY_WIN32 ? HRESULT_CODE(hr) : static_cast<DWORD>(hr));
++  }
++  return attributes;
++}
++static BOOL StorageCreateDirectory(const wchar_t* path, LPSECURITY_ATTRIBUTES security) {
++  BOOL created = CreateDirectoryW(path, security);
++  if (!created && GetLastError() == ERROR_ACCESS_DENIED && security == nullptr) {
++    HRESULT hr = FlutterWinRTCreateDirectory(path);
++    created = SUCCEEDED(hr);
++    if (!created) SetLastError(HRESULT_FACILITY(hr) == FACILITY_WIN32 ? HRESULT_CODE(hr) : static_cast<DWORD>(hr));
++  }
++  return created;
++}
++#else
++#define StorageDirectoryAttributes GetFileAttributesW
++#define StorageCreateDirectory CreateDirectoryW
++#endif
++
++static HANDLE OpenDirectoryHandle(const wchar_t* path) {
++#if defined(DART_TARGET_OS_WINDOWS_UWP)
++  CREATEFILE2_EXTENDED_PARAMETERS parameters = {};
++  parameters.dwSize = sizeof(parameters);
++  parameters.dwFileFlags = FILE_FLAG_BACKUP_SEMANTICS;
++  return CreateFile2(path, 0,
++                     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
++                     OPEN_EXISTING, &parameters);
++#else
++  return CreateFileW(path, 0,
++                     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
++                     nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
++#endif
++}
++
++
+ PathBuffer::PathBuffer() : length_(0) {
+   data_ = calloc(MAX_LONG_PATH + 1, sizeof(wchar_t));  // NOLINT
+ }
+@@ -74,10 +121,19 @@ void PathBuffer::Reset(intptr_t new_length) {
+ // If link_name points to a link, IsBrokenLink will return true if link_name
+ // points to an invalid target.
+ static bool IsBrokenLink(const wchar_t* link_name) {
+-  HANDLE handle = CreateFileW(
+-      link_name, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+-      nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
++  HANDLE handle = OpenDirectoryHandle(link_name);
+   if (handle == INVALID_HANDLE_VALUE) {
++#if defined(FLUTTER_WINDOWS_PHONE)
++    if (GetLastError() == ERROR_ACCESS_DENIED) {
++      // GetFolderFromPathAsync resolves the directory through the OS broker.
++      // A native path-open denial alone does not establish a broken link.
++      DWORD attributes = INVALID_FILE_ATTRIBUTES;
++      HRESULT hr = FlutterWinRTDirectoryAttributes(link_name, &attributes);
++      if (SUCCEEDED(hr)) return (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
++      SetLastError(HRESULT_FACILITY(hr) == FACILITY_WIN32 ? HRESULT_CODE(hr)
++                                                       : static_cast<DWORD>(hr));
++    }
++#endif
+     return true;
+   } else {
+     CloseHandle(handle);
+@@ -88,9 +144,14 @@ static bool IsBrokenLink(const wchar_t* link_name) {
+ // A linked list structure holding a link target's unique file system ID.
+ // Used to detect loops in the file system when listing recursively.
+ struct LinkList {
++#if defined(DART_TARGET_OS_WINDOWS_UWP)
++  ULONGLONG volume;
++  FILE_ID_128 id;
++#else
+   DWORD volume;
+   DWORD id_low;
+   DWORD id_high;
++#endif
+   LinkList* next;
+ };
+ 
+@@ -108,10 +169,7 @@ static ListType HandleFindFile(DirectoryListing* listing,
+     if (!listing->follow_links()) {
+       return kListLink;
+     }
+-    HANDLE handle = CreateFileW(
+-        listing->path_buffer().AsStringW(), 0,
+-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+-        OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
++    HANDLE handle = OpenDirectoryHandle(listing->path_buffer().AsStringW());
+     if (handle == INVALID_HANDLE_VALUE) {
+       // Report as (broken) link.
+       return kListLink;
+@@ -119,24 +177,37 @@ static ListType HandleFindFile(DirectoryListing* listing,
+     if ((attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+       // Check the seen link targets to see if we are in a file system loop.
+       LinkList current_link;
++#if defined(DART_TARGET_OS_WINDOWS_UWP)
++      FILE_ID_INFO info;
++      if (!GetFileInformationByHandleEx(handle, FileIdInfo, &info, sizeof(info))) {
++#else
+       BY_HANDLE_FILE_INFORMATION info;
+-      // Get info
+       if (!GetFileInformationByHandle(handle, &info)) {
++#endif
+         DWORD error = GetLastError();
+         CloseHandle(handle);
+         SetLastError(error);
+         return kListError;
+       }
+       CloseHandle(handle);
++#if defined(DART_TARGET_OS_WINDOWS_UWP)
++      current_link.volume = info.VolumeSerialNumber;
++      current_link.id = info.FileId;
++#else
+       current_link.volume = info.dwVolumeSerialNumber;
+       current_link.id_low = info.nFileIndexLow;
+       current_link.id_high = info.nFileIndexHigh;
++#endif
+       current_link.next = entry->link();
+       LinkList* previous = entry->link();
+       while (previous != nullptr) {
+         if ((previous->volume == current_link.volume) &&
++#if defined(DART_TARGET_OS_WINDOWS_UWP)
++            (memcmp(&previous->id, &current_link.id, sizeof(current_link.id)) == 0)) {
++#else
+             (previous->id_low == current_link.id_low) &&
+             (previous->id_high == current_link.id_high)) {
++#endif
+           // Report the looping link as a link, rather than following it.
+           return kListLink;
+         }
+@@ -178,6 +249,21 @@ ListType DirectoryListingEntry::Next(DirectoryListing* listing) {
+ 
+     path_length_ = listing->path_buffer().length() - 1;
+ 
++#if defined(FLUTTER_WINDOWS_PHONE)
++    // Windows.Storage retains picker grants that path-based Win32 I/O cannot
++    // use. This cursor supplies the real OS names and attributes used below.
++    const wchar_t* pattern = listing->path_buffer().AsStringW();
++    std::wstring directory(pattern, wcslen(pattern) - 1);
++    void* cursor = nullptr;
++    HRESULT hr = FlutterWinRTDirectoryOpen(directory.c_str(), &cursor);
++    if (FAILED(hr)) {
++      SetLastError(HRESULT_FACILITY(hr) == FACILITY_WIN32 ? HRESULT_CODE(hr) : static_cast<DWORD>(hr));
++      done_ = true;
++      return kListError;
++    }
++    lister_ = reinterpret_cast<intptr_t>(cursor);
++    listing->path_buffer().Reset(path_length_);
++#else
+     HANDLE find_handle =
+         FindFirstFileW(listing->path_buffer().AsStringW(), &find_file_data);
+ 
+@@ -191,21 +277,36 @@ ListType DirectoryListingEntry::Next(DirectoryListing* listing) {
+     listing->path_buffer().Reset(path_length_);
+ 
+     return HandleFindFile(listing, this, find_file_data);
++#endif
+   }
+ 
+   // Reset.
+   listing->path_buffer().Reset(path_length_);
+   ResetLink();
+ 
++#if defined(FLUTTER_WINDOWS_PHONE)
++  BOOL found = FALSE;
++  HRESULT hr = FlutterWinRTDirectoryNext(reinterpret_cast<void*>(lister_),
++      find_file_data.cFileName, MAX_PATH, &find_file_data.dwFileAttributes, &found);
++  if (FAILED(hr)) {
++    SetLastError(HRESULT_FACILITY(hr) == FACILITY_WIN32 ? HRESULT_CODE(hr) : static_cast<DWORD>(hr));
++    done_ = true;
++    return kListError;
++  }
++  if (found) {
++#else
+   if (FindNextFileW(reinterpret_cast<HANDLE>(lister_), &find_file_data) != 0) {
++#endif
+     return HandleFindFile(listing, this, find_file_data);
+   }
+ 
+   done_ = true;
+ 
++#if !defined(FLUTTER_WINDOWS_PHONE)
+   if (GetLastError() != ERROR_NO_MORE_FILES) {
+     return kListError;
+   }
++#endif
+ 
+   return kListDone;
+ }
+@@ -213,7 +314,11 @@ ListType DirectoryListingEntry::Next(DirectoryListing* listing) {
+ DirectoryListingEntry::~DirectoryListingEntry() {
+   ResetLink();
+   if (lister_ != 0) {
++#if defined(FLUTTER_WINDOWS_PHONE)
++    FlutterWinRTDirectoryClose(reinterpret_cast<void*>(lister_));
++#else
+     FindClose(reinterpret_cast<HANDLE>(lister_));
++#endif
+   }
+ }
+ 
+@@ -359,7 +464,7 @@ class RecursiveDeleter {
+ }  // namespace
+ 
+ Directory::ExistsResult Directory::Exists(const wchar_t* dir_name) {
+-  DWORD attributes = GetFileAttributesW(dir_name);
++  DWORD attributes = StorageDirectoryAttributes(dir_name);
+   if (attributes == INVALID_FILE_ATTRIBUTES) {
+     DWORD last_error = GetLastError();
+     if ((last_error == ERROR_FILE_NOT_FOUND) ||
+@@ -401,7 +506,7 @@ char* Directory::CurrentNoScope() {
+ 
+ bool Directory::Create(Namespace* namespc, const char* dir_name) {
+   const auto path = ToWinAPIPath(dir_name);
+-  int create_status = CreateDirectoryW(path.get(), nullptr);
++  int create_status = StorageCreateDirectory(path.get(), nullptr);
+   // If the directory already existed, treat it as a success.
+   if ((create_status == 0) && (GetLastError() == ERROR_ALREADY_EXISTS) &&
+       (Exists(path.get()) == EXISTS)) {
+@@ -436,7 +541,7 @@ static const char* CreateTempFromUUID(const char* prefix) {
+     return nullptr;
+   }
+   wchar_t* uuid_string;
+-  status = UuidToStringW(&uuid, &uuid_string);
++  status = UuidToStringW(&uuid, reinterpret_cast<RPC_WSTR*>(&uuid_string));
+   if (status != RPC_S_OK) {
+     return nullptr;
+   }
+@@ -445,8 +550,8 @@ static const char* CreateTempFromUUID(const char* prefix) {
+   if (!path.AddW(uuid_string)) {
+     return nullptr;
+   }
+-  RpcStringFreeW(&uuid_string);
+-  if (!CreateDirectoryW(path.AsStringW(), nullptr)) {
++  RpcStringFreeW(reinterpret_cast<RPC_WSTR*>(&uuid_string));
++  if (!StorageCreateDirectory(path.AsStringW(), nullptr)) {
+     return nullptr;
+   }
+   return path.AsScopedString();
+@@ -495,7 +600,7 @@ const char* Directory::CreateTemp(Namespace* namespc, const char* prefix) {
+     return nullptr;
+   }
+ 
+-  if (!CreateDirectoryW(path.AsStringW(), nullptr)) {
++  if (!StorageCreateDirectory(path.AsStringW(), nullptr)) {
+     // Creation failed, possibly because an entry with the name already exists.
+     // Fall back to using the UUID suffix.
+     return CreateTempFromUUID(prefix);
+diff --git a/runtime/bin/eventhandler_win.h b/runtime/bin/eventhandler_win.h
+index 9f54c6e9..d5859153 100644
+--- a/runtime/bin/eventhandler_win.h
++++ b/runtime/bin/eventhandler_win.h
+@@ -15,6 +15,11 @@
+ #include <memory>
+ #include <utility>
+ 
++#if defined(__MINGW32__)
++// Keep COM header macros out of Dart declarations.
++#undef interface
++#endif
++
+ #include "bin/builtin.h"
+ #include "bin/lockers.h"
+ #include "bin/reference_counting.h"
+diff --git a/runtime/bin/file_system_watcher_win.cc b/runtime/bin/file_system_watcher_win.cc
+index 0ac70ece..58ddb97b 100644
+--- a/runtime/bin/file_system_watcher_win.cc
++++ b/runtime/bin/file_system_watcher_win.cc
+@@ -37,11 +37,20 @@ intptr_t FileSystemWatcher::WatchPath(intptr_t id,
+                                       bool recursive) {
+   USE(id);
+   const auto name = Utf8ToWideChar(path);
++#if defined(DART_TARGET_OS_WINDOWS_UWP)
++  CREATEFILE2_EXTENDED_PARAMETERS parameters = {};
++  parameters.dwSize = sizeof(parameters);
++  parameters.dwFileFlags = FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED;
++  HANDLE dir = CreateFile2(name.get(), FILE_LIST_DIRECTORY,
++                           FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
++                           OPEN_EXISTING, &parameters);
++#else
+   HANDLE dir =
+       CreateFileW(name.get(), FILE_LIST_DIRECTORY,
+                   FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                   nullptr, OPEN_EXISTING,
+                   FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED, nullptr);
++#endif
+ 
+   if (dir == INVALID_HANDLE_VALUE) {
+     return -1;
+diff --git a/runtime/bin/file_win.cc b/runtime/bin/file_win.cc
+index 84349659..310b629a 100644
+--- a/runtime/bin/file_win.cc
++++ b/runtime/bin/file_win.cc
+@@ -36,6 +36,56 @@
+ namespace dart {
+ namespace bin {
+ 
++#if defined(FLUTTER_WINDOWS_PHONE)
++extern "C" __declspec(dllimport) HRESULT WINAPI FlutterWinRTOpenFile(
++    LPCWSTR, DWORD, DWORD, DWORD, DWORD, HANDLE*);
++
++static int OpenFileDescriptorW(const wchar_t* path, int flags, int mode) {
++  int fd = _wopen(path, flags, mode);
++  if (fd < 0 && errno == EACCES) {
++    DWORD access = (flags & _O_RDWR) ? FILE_GENERIC_READ | FILE_GENERIC_WRITE
++                    : (flags & _O_WRONLY) ? FILE_GENERIC_WRITE : FILE_GENERIC_READ;
++    DWORD creation = (flags & _O_CREAT)
++                         ? ((flags & _O_EXCL) ? CREATE_NEW
++                            : (flags & _O_TRUNC) ? CREATE_ALWAYS : OPEN_ALWAYS)
++                         : ((flags & _O_TRUNC) ? TRUNCATE_EXISTING : OPEN_EXISTING);
++    HANDLE handle = INVALID_HANDLE_VALUE;
++    HRESULT hr = FlutterWinRTOpenFile(path, creation, access,
++                                    FILE_SHARE_READ | FILE_SHARE_WRITE, 0, &handle);
++    if (SUCCEEDED(hr)) {
++      fd = _open_osfhandle(reinterpret_cast<intptr_t>(handle),
++                          flags & (_O_WRONLY | _O_RDWR | _O_APPEND | _O_BINARY |
++                                   _O_TEXT | _O_NOINHERIT));
++      if (fd < 0) CloseHandle(handle);
++    } else if (HRESULT_FACILITY(hr) == FACILITY_WIN32) {
++      SetLastError(HRESULT_CODE(hr));
++    }
++  }
++  return fd;
++}
++#else
++#define OpenFileDescriptorW _wopen
++#endif
++
++
++static HANDLE OpenWindowsFile(LPCWSTR name, DWORD access, DWORD share,
++                              LPSECURITY_ATTRIBUTES security, DWORD disposition,
++                              DWORD flags, HANDLE template_file) {
++#if defined(FLUTTER_WINDOWS_PHONE)
++  CREATEFILE2_EXTENDED_PARAMETERS parameters = {};
++  parameters.dwSize = sizeof(parameters);
++  parameters.dwFileAttributes = flags & 0x0000FFFF;
++  parameters.dwFileFlags = flags & 0xFFFF0000;
++  parameters.lpSecurityAttributes = security;
++  parameters.hTemplateFile = template_file;
++  return CreateFile2(name, access, share, disposition, &parameters);
++#else
++  return CreateFileW(name, access, share, security, disposition, flags,
++                     template_file);
++#endif
++}
++
++
+ class FileHandle {
+  public:
+   explicit FileHandle(int fd) : fd_(fd) {}
+@@ -94,7 +144,12 @@ MappedMemory* File::Map(File::MapType type,
+       prot_final = PAGE_READONLY;
+       break;
+     case File::kReadExecute:
++#if defined(FLUTTER_WINDOWS_PHONE)
++      // Populate the image while writable, then make it readable and executable.
++      prot_alloc = PAGE_READWRITE;
++#else
+       prot_alloc = PAGE_EXECUTE_READWRITE;
++#endif
+       prot_final = PAGE_EXECUTE_READ;
+       break;
+     case File::kReadWrite:
+@@ -105,7 +160,11 @@ MappedMemory* File::Map(File::MapType type,
+ 
+   void* addr = start;
+   if (addr == nullptr) {
++#if defined(FLUTTER_WINDOWS_PHONE)
++    addr = VirtualAllocFromApp(nullptr, length, MEM_COMMIT | MEM_RESERVE, prot_alloc);
++#else
+     addr = VirtualAlloc(nullptr, length, MEM_COMMIT | MEM_RESERVE, prot_alloc);
++#endif
+     if (addr == nullptr) {
+       Syslog::PrintErr("VirtualAlloc failed %d\n", GetLastError());
+       return nullptr;
+@@ -130,7 +189,16 @@ MappedMemory* File::Map(File::MapType type,
+   }
+ 
+   DWORD old_prot;
++#if defined(FLUTTER_WINDOWS_PHONE)
++  bool result = VirtualProtectFromApp(addr, length, prot_final, &old_prot);
++#else
+   bool result = VirtualProtect(addr, length, prot_final, &old_prot);
++#endif
++  // The code bytes were copied into writable memory above. Cache coherence is
++  // required for executable mappings on desktop ARM as well as Phone.
++  if (result && type == File::kReadExecute) {
++    result = FlushInstructionCache(GetCurrentProcess(), addr, length);
++  }
+   if (!result) {
+     Syslog::PrintErr("VirtualProtect failed %d\n", GetLastError());
+     if (start == nullptr) {
+@@ -306,7 +374,7 @@ File* File::FileOpenW(const wchar_t* system_name, FileOpenMode mode) {
+   if ((mode & kTruncate) != 0) {
+     flags = flags | O_TRUNC;
+   }
+-  int fd = _wopen(system_name, flags, 0666);
++  int fd = OpenFileDescriptorW(system_name, flags, 0666);
+   if (fd < 0) {
+     return nullptr;
+   }
+@@ -469,6 +537,19 @@ File* File::OpenStdio(int fd) {
+ 
+ static bool StatHelper(const wchar_t* path, struct __stat64* st) {
+   int stat_status = _wstat64(path, st);
++#if defined(FLUTTER_WINDOWS_PHONE)
++  if (stat_status != 0) {
++    // A brokered file's pathname is not a native filesystem permission grant.
++    // Query the real handle through the SDK and retain CRT metadata semantics.
++    int fd = OpenFileDescriptorW(path, _O_RDONLY | _O_BINARY | _O_NOINHERIT, 0);
++    if (fd >= 0) {
++      stat_status = _fstat64(fd, st);
++      DWORD error = GetLastError();
++      _close(fd);
++      if (stat_status != 0) SetLastError(error);
++    }
++  }
++#endif
+   if (stat_status != 0) {
+     return false;
+   }
+@@ -510,7 +591,7 @@ bool File::Create(Namespace* namespc, const char* name, bool exclusive) {
+   if (exclusive) {
+     flags |= O_EXCL;
+   }
+-  int fd = _wopen(path.get(), flags, 0666);
++  int fd = OpenFileDescriptorW(path.get(), flags, 0666);
+   if (fd < 0) {
+     return false;
+   }
+@@ -550,6 +631,10 @@ typedef struct _REPARSE_DATA_BUFFER {
+ bool File::CreateLink(Namespace* namespc,
+                       const char* utf8_name,
+                       const char* utf8_target) {
++#if defined(DART_TARGET_OS_WINDOWS_UWP)
++  SetLastError(ERROR_NOT_SUPPORTED);
++  return false;
++#else
+   const auto name = ToWinAPIPath(utf8_name);
+   if (name.get() == nullptr) {
+     SetLastError(ERROR_INVALID_NAME);
+@@ -634,9 +719,16 @@ bool File::CreateLink(Namespace* namespc,
+   }
+ 
+   return (create_status != 0);
++#endif
+ }
+ 
+ bool File::CreatePipe(Namespace* namespc, File** readPipe, File** writePipe) {
++#if defined(DART_TARGET_OS_WINDOWS_UWP)
++  *readPipe = nullptr;
++  *writePipe = nullptr;
++  SetLastError(ERROR_NOT_SUPPORTED);
++  return false;
++#else
+   int pipe_fds[2];
+   int status = _pipe(pipe_fds, 4096, _O_BINARY);
+   if (status != 0) {
+@@ -645,6 +737,7 @@ bool File::CreatePipe(Namespace* namespc, File** readPipe, File** writePipe) {
+   *readPipe = OpenFD(pipe_fds[0]);
+   *writePipe = OpenFD(pipe_fds[1]);
+   return true;
++#endif
+ }
+ 
+ bool File::Delete(Namespace* namespc, const char* name) {
+@@ -746,7 +839,7 @@ static std::unique_ptr<wchar_t[]> GetDirectoryPath(
+ }
+ 
+ static void FreeUUID(wchar_t* ptr) {
+-  RpcStringFreeW(&ptr);
++  RpcStringFreeW(reinterpret_cast<RPC_WSTR*>(&ptr));
+ }
+ 
+ static std::unique_ptr<wchar_t, decltype(FreeUUID)*> GenerateUUIDString() {
+@@ -756,7 +849,7 @@ static std::unique_ptr<wchar_t, decltype(FreeUUID)*> GenerateUUIDString() {
+     return {nullptr, nullptr};
+   }
+   wchar_t* uuid_string;
+-  status = UuidToStringW(&uuid, &uuid_string);
++  status = UuidToStringW(&uuid, reinterpret_cast<RPC_WSTR*>(&uuid_string));
+   if (status != RPC_S_OK) {
+     return {nullptr, nullptr};
+   }
+@@ -841,7 +934,11 @@ bool File::Copy(Namespace* namespc,
+     DeleteFileW(new_path.get());
+   }
+ 
++#if defined(FLUTTER_WINDOWS_PHONE)
++  if (!MoveFileExW(temp_file.get(), new_path.get(), 0)) {
++#else
+   if (!MoveFileW(temp_file.get(), new_path.get())) {
++#endif
+     DWORD error = GetLastError();
+     DeleteFileW(temp_file.get());
+     SetLastError(error);
+@@ -868,7 +965,7 @@ const char* File::LinkTarget(Namespace* namespc,
+   if (path.get() == nullptr) {
+     return nullptr;
+   }
+-  HANDLE dir_handle = CreateFileW(
++  HANDLE dir_handle = OpenWindowsFile(
+       path.get(), GENERIC_READ,
+       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+       OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+@@ -1011,7 +1108,7 @@ bool File::SetLastAccessed(Namespace* namespc,
+   // So set the file access time directly using SetFileTime.
+   FILETIME at = GetFiletimeFromMillis(millis);
+   HANDLE file_handle =
+-      CreateFileW(path.get(), FILE_WRITE_ATTRIBUTES,
++      OpenWindowsFile(path.get(), FILE_WRITE_ATTRIBUTES,
+                   FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                   nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+   if (file_handle == INVALID_HANDLE_VALUE) {
+@@ -1062,7 +1159,7 @@ const char* File::GetCanonicalPath(Namespace* namespc,
+     return nullptr;
+   }
+   HANDLE file_handle =
+-      CreateFileW(path.get(), 0, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
++      OpenWindowsFile(path.get(), 0, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                   FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+   if (file_handle == INVALID_HANDLE_VALUE) {
+     return nullptr;
+@@ -1134,19 +1231,30 @@ File::Type File::GetType(const wchar_t* path, bool follow_links) {
+     return File::kDoesNotExist;
+   } else if ((attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+     if (follow_links) {
+-      HANDLE target_handle = CreateFileW(
++      HANDLE target_handle = OpenWindowsFile(
+           path, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+           nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+       if (target_handle == INVALID_HANDLE_VALUE) {
+         return File::kDoesNotExist;
+       } else {
++#if defined(FLUTTER_WINDOWS_PHONE)
++        FILE_ATTRIBUTE_TAG_INFO info = {};
++        bool got_info = GetFileInformationByHandleEx(target_handle,
++            FileAttributeTagInfo, &info, sizeof(info));
++#else
+         BY_HANDLE_FILE_INFORMATION info;
+-        if (!GetFileInformationByHandle(target_handle, &info)) {
++        bool got_info = GetFileInformationByHandle(target_handle, &info);
++#endif
++        if (!got_info) {
+           CloseHandle(target_handle);
+           return File::kDoesNotExist;
+         }
+         CloseHandle(target_handle);
++#if defined(FLUTTER_WINDOWS_PHONE)
++        return ((info.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
++#else
+         return ((info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
++#endif
+                    ? File::kIsDirectory
+                    : File::kIsFile;
+       }
+@@ -1175,14 +1283,18 @@ File::Identical File::AreIdentical(Namespace* namespc_1,
+                                    const char* file_2) {
+   USE(namespc_1);
+   USE(namespc_2);
++#if defined(FLUTTER_WINDOWS_PHONE)
++  FILE_ID_INFO file_info[2] = {};
++#else
+   BY_HANDLE_FILE_INFORMATION file_info[2];
++#endif
+   const std::unique_ptr<wchar_t[]> file_names[2] = {ToWinAPIPath(file_1),
+                                                     ToWinAPIPath(file_2)};
+   if (file_names[0].get() == nullptr || file_names[1].get() == nullptr) {
+     return File::kError;
+   }
+   for (int i = 0; i < 2; ++i) {
+-    HANDLE file_handle = CreateFileW(
++    HANDLE file_handle = OpenWindowsFile(
+         file_names[i].get(), 0,
+         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+         OPEN_EXISTING,
+@@ -1190,7 +1302,12 @@ File::Identical File::AreIdentical(Namespace* namespc_1,
+     if (file_handle == INVALID_HANDLE_VALUE) {
+       return File::kError;
+     }
++#if defined(FLUTTER_WINDOWS_PHONE)
++    int result = GetFileInformationByHandleEx(file_handle, FileIdInfo,
++        &file_info[i], sizeof(file_info[i]));
++#else
+     int result = GetFileInformationByHandle(file_handle, &file_info[i]);
++#endif
+     if (result == 0) {
+       DWORD error = GetLastError();
+       CloseHandle(file_handle);
+@@ -1201,10 +1318,16 @@ File::Identical File::AreIdentical(Namespace* namespc_1,
+       return File::kError;
+     }
+   }
++#if defined(FLUTTER_WINDOWS_PHONE)
++  if (file_info[0].VolumeSerialNumber == file_info[1].VolumeSerialNumber &&
++      memcmp(file_info[0].FileId.Identifier, file_info[1].FileId.Identifier,
++             sizeof(file_info[0].FileId.Identifier)) == 0) {
++#else
+   if ((file_info[0].dwVolumeSerialNumber ==
+        file_info[1].dwVolumeSerialNumber) &&
+       (file_info[0].nFileIndexHigh == file_info[1].nFileIndexHigh) &&
+       (file_info[0].nFileIndexLow == file_info[1].nFileIndexLow)) {
++#endif
+     return kIdentical;
+   } else {
+     return kDifferent;
+diff --git a/runtime/bin/platform_win.cc b/runtime/bin/platform_win.cc
+index 2228adf5..bd2cd6cd 100644
+--- a/runtime/bin/platform_win.cc
++++ b/runtime/bin/platform_win.cc
+@@ -7,9 +7,21 @@
+ 
+ #include "bin/platform.h"
+ 
++#if !defined(FLUTTER_WINDOWS_PHONE)
++#pragma push_macro("interface")
++#define interface struct
+ #include <comdef.h>
+ #include <crtdbg.h>
+ #include <wbemidl.h>
++#pragma pop_macro("interface")
++#else
++#pragma push_macro("interface")
++#define interface struct
++#include <windows.system.profile.h>
++#pragma pop_macro("interface")
++#include <roapi.h>
++#include <winstring.h>
++#endif
+ #include <wrl/client.h>
+ #undef interface
+ #include <string>
+@@ -46,12 +58,14 @@ class PlatformWin {
+     // Ensure no dialog boxes for assertions, errors and warnings in the CRT
+     // in Debug builds.
+     // See: https://msdn.microsoft.com/en-us/library/1y71x448.aspx
++#if !defined(FLUTTER_WINDOWS_PHONE)
+     _CrtSetReportMode(_CRT_WARN, _CRTDBG_MODE_DEBUG | _CRTDBG_MODE_FILE);
+     _CrtSetReportFile(_CRT_WARN, _CRTDBG_FILE_STDERR);
+     _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_DEBUG | _CRTDBG_MODE_FILE);
+     _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+     _CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_DEBUG | _CRTDBG_MODE_FILE);
+     _CrtSetReportFile(_CRT_ERROR, _CRTDBG_FILE_STDERR);
++#endif
+ 
+     // Set location where the C runtime writes an error message for an error
+     // that might end the program.
+@@ -119,6 +133,7 @@ class PlatformWin {
+   DISALLOW_IMPLICIT_CONSTRUCTORS(PlatformWin);
+ };
+ 
++#if !defined(FLUTTER_WINDOWS_PHONE)
+ class CoInitializeScope : public ValueObject {
+  public:
+   CoInitializeScope() { hres = CoInitializeEx(0, COINIT_MULTITHREADED); }
+@@ -131,6 +146,8 @@ class CoInitializeScope : public ValueObject {
+   HRESULT hres;
+ };
+ 
++#endif
++
+ bool Platform::Initialize() {
+   PlatformWin::InitOnce();
+   return true;
+@@ -146,6 +163,7 @@ int Platform::NumberOfProcessors() {
+ // registry because GetVersionEx() and friends lie about the OS version after
+ // Windows 8.1. See:
+ // https://msdn.microsoft.com/en-us/library/windows/desktop/ms724451(v=vs.85).aspx
++#if !defined(FLUTTER_WINDOWS_PHONE)
+ static constexpr const wchar_t* kCurrentVersion =
+     L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion";
+ 
+@@ -291,6 +309,49 @@ const char* Platform::OperatingSystemVersion() {
+   return result;
+ }
+ 
++#else
++const char* Platform::OperatingSystemVersion() {
++  // AnalyticsInfo is available on Windows 10 Mobile; registry/WMI are not.
++  HRESULT initialized = RoInitialize(RO_INIT_MULTITHREADED);
++  if (FAILED(initialized) && initialized != RPC_E_CHANGED_MODE) return nullptr;
++  const char* result = nullptr;
++  {
++    HSTRING class_name = nullptr;
++    HSTRING version_string = nullptr;
++    HSTRING family = nullptr;
++    ComPtr<ABI::Windows::System::Profile::IAnalyticsInfoStatics> factory;
++    ComPtr<ABI::Windows::System::Profile::IAnalyticsVersionInfo> info;
++    const wchar_t* name = RuntimeClass_Windows_System_Profile_AnalyticsInfo;
++    HRESULT hr = WindowsCreateString(name, wcslen(name), &class_name);
++    if (SUCCEEDED(hr)) {
++      hr = RoGetActivationFactory(class_name, __uuidof(ABI::Windows::System::Profile::IAnalyticsInfoStatics),
++                                   reinterpret_cast<void**>(factory.GetAddressOf()));
++    }
++    if (SUCCEEDED(hr)) hr = factory->get_VersionInfo(info.GetAddressOf());
++    if (SUCCEEDED(hr)) hr = info->get_DeviceFamilyVersion(&version_string);
++    if (SUCCEEDED(hr)) hr = info->get_DeviceFamily(&family);
++    if (SUCCEEDED(hr)) {
++      const wchar_t* value = WindowsGetStringRawBuffer(version_string, nullptr);
++      wchar_t* end = nullptr;
++      uint64_t version = wcstoull(value, &end, 10);
++      if (end != value && *end == 0) {
++        const char* family_utf8 = StringUtilsWin::WideToUtf8(WindowsGetStringRawBuffer(family, nullptr));
++        result = DartUtils::ScopedCStringFormatted("%s %u.%u.%u.%u", family_utf8,
++          static_cast<unsigned>((version >> 48) & 0xffff),
++          static_cast<unsigned>((version >> 32) & 0xffff),
++          static_cast<unsigned>((version >> 16) & 0xffff),
++          static_cast<unsigned>(version & 0xffff));
++      }
++    }
++    WindowsDeleteString(family);
++    WindowsDeleteString(version_string);
++    WindowsDeleteString(class_name);
++  }
++  if (SUCCEEDED(initialized)) RoUninitialize();
++  return result;
++}
++#endif
++
+ const char* Platform::LibraryPrefix() {
+   return "";
+ }
+@@ -368,7 +429,7 @@ const char* Platform::ResolveExecutablePath() {
+   // hold any Windows path.
+   const int kTmpBufferSize = 32768;
+   wchar_t* tmp_buffer =
+-      reinterpret_cast<wchar_t*>(Dart_ScopeAllocate(kTmpBufferSize));
++      reinterpret_cast<wchar_t*>(Dart_ScopeAllocate(kTmpBufferSize * sizeof(wchar_t)));
+   // Ensure no last error before calling GetModuleFileNameW.
+   SetLastError(ERROR_SUCCESS);
+   // Get the required length of the buffer.
+@@ -379,6 +440,12 @@ const char* Platform::ResolveExecutablePath() {
+   char* path = StringUtilsWin::WideToUtf8(tmp_buffer);
+   // Return the canonical path as the returned path might contain symlinks.
+   const char* canon_path = File::GetCanonicalPath(nullptr, path);
++#if defined(FLUTTER_WINDOWS_PHONE)
++  // The OS loader supplies the executable path, but AppContainer restrictions
++  // can deny reopening it for GetFinalPathNameByHandle. Keep the loader's path
++  // rather than returning null for this required dart:io String property.
++  if (canon_path == nullptr) return path;
++#endif
+   return canon_path;
+ }
+ 
+diff --git a/runtime/bin/socket_base_win.cc b/runtime/bin/socket_base_win.cc
+index 966dada4..093ab7a8 100644
+--- a/runtime/bin/socket_base_win.cc
++++ b/runtime/bin/socket_base_win.cc
+@@ -7,6 +7,8 @@
+ 
+ #include "bin/socket_base.h"
+ 
++#include <errno.h>  // NOLINT
++
+ #include "bin/builtin.h"
+ #include "bin/eventhandler.h"
+ #include "bin/file.h"
+diff --git a/runtime/bin/socket_base_win.h b/runtime/bin/socket_base_win.h
+index 9bfbe8c9..daa721c6 100644
+--- a/runtime/bin/socket_base_win.h
++++ b/runtime/bin/socket_base_win.h
+@@ -15,4 +15,13 @@
+ #include <winsock2.h>
+ #include <ws2tcpip.h>
+ 
++#if defined(__MINGW32__)
++// RPC headers redefine this COM macro outside their include guard.
++#undef interface
++// IP Helper includes WinCrypt in MinGW; this macro collides with BoringSSL.
++#undef X509_NAME
++#undef X509_EXTENSIONS
++#undef PKCS7_SIGNER_INFO
++#endif
++
+ #endif  // RUNTIME_BIN_SOCKET_BASE_WIN_H_
+diff --git a/runtime/bin/virtual_memory_win.cc b/runtime/bin/virtual_memory_win.cc
+index b6075ed2..d5392b42 100644
+--- a/runtime/bin/virtual_memory_win.cc
++++ b/runtime/bin/virtual_memory_win.cc
+@@ -29,7 +29,11 @@ VirtualMemory* VirtualMemory::Allocate(intptr_t size,
+                                        const char* name) {
+   ASSERT(Utils::IsAligned(size, PageSize()));
+   int prot = is_executable ? PAGE_EXECUTE_READWRITE : PAGE_READWRITE;
++#if defined(FLUTTER_WINDOWS_PHONE)
++  void* address = VirtualAllocFromApp(nullptr, size, MEM_RESERVE | MEM_COMMIT, prot);
++#else
+   void* address = VirtualAlloc(nullptr, size, MEM_RESERVE | MEM_COMMIT, prot);
++#endif
+   if (address == nullptr) {
+     return nullptr;
+   }
+@@ -67,7 +71,11 @@ void VirtualMemory::Protect(void* address, intptr_t size, Protection mode) {
+       break;
+   }
+   DWORD old_prot = 0;
++#if defined(FLUTTER_WINDOWS_PHONE)
++  if (VirtualProtectFromApp(reinterpret_cast<void*>(page_address),
++#else
+   if (VirtualProtect(reinterpret_cast<void*>(page_address),
++#endif
+                      end_address - page_address, prot, &old_prot) == 0) {
+     FATAL("VirtualProtect failed %d\n", GetLastError());
+   }
+diff --git a/runtime/platform/globals.h b/runtime/platform/globals.h
+index b70b16fc..e36206d8 100644
+--- a/runtime/platform/globals.h
++++ b/runtime/platform/globals.h
+@@ -71,6 +71,10 @@
+ #include <versionhelpers.h>
+ #include <windows.h>
+ #include <winsock2.h>
++#if defined(__MINGW32__)
++// rpc.h's COM helper macro collides with Dart's C++ parameter names.
++#undef interface
++#endif
+ #endif  // defined(_WIN32)
+ 
+ #if !defined(_WIN32)
+diff --git a/runtime/platform/utils.cc b/runtime/platform/utils.cc
+index 9ecd17d9..eb3f47e0 100644
+--- a/runtime/platform/utils.cc
++++ b/runtime/platform/utils.cc
+@@ -4,6 +4,10 @@
+ 
+ #include "platform/utils.h"
+ 
++#if defined(FLUTTER_WINDOWS_PHONE)
++#include <combaseapi.h>
++#endif
++
+ #include "platform/allocation.h"
+ #include "platform/globals.h"
+ 
+@@ -339,12 +343,30 @@ void* Utils::LoadDynamicLibrary(const char* library_path,
+           MultiByteToWideChar(CP_UTF8, /*dwFlags=*/0, library_path,
+                               /*cbMultiByte=*/-1, name.get(), name_len);
+       RELEASE_ASSERT(written_len == name_len);
++#if defined(FLUTTER_WINDOWS_PHONE)
++      // The Phone runner packages native libraries in its dependency graph.
++      handle = LoadPackagedLibrary(name.get(), 0);
++      if (handle == nullptr && _wcsicmp(name.get(), L"ole32.dll") == 0) {
++        // Mobile exposes COM through an OS API-set contract rather than the
++        // desktop ole32 facade. Only resolve that bare legacy module name;
++        // explicit paths and unrelated modules retain normal loader behavior.
++        // The handle belongs to the OS, including allocation/free symbols.
++        handle = LoadPackagedLibrary(L"api-ms-win-core-com-l1-1-0.dll", 0);
++        if (handle == nullptr) {
++          // Mobile may reject OS modules in its package graph. Acquire our
++          // packaged runtime instead; resolution below exposes only the OS
++          // COM allocator functions, with balanced loader reference counts.
++          handle = LoadPackagedLibrary(L"flutter_engine.dll", 0);
++        }
++      }
++#else
+       if (search_dll_load_dir) {
+         handle =
+             LoadLibraryExW(name.get(), NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
+       } else {
+         handle = LoadLibraryW(name.get());
+       }
++#endif
+     }
+   }
+ #endif
+@@ -369,6 +391,21 @@ void* Utils::ResolveSymbolInDynamicLibrary(void* library_handle,
+   return result;
+ #elif defined(DART_HOST_OS_WINDOWS)
+   SetLastError(0);
++#if defined(FLUTTER_WINDOWS_PHONE)
++  const bool com_alloc = strcmp(symbol, "CoTaskMemAlloc") == 0;
++  const bool com_free = strcmp(symbol, "CoTaskMemFree") == 0;
++  if (com_alloc || com_free) {
++    HMODULE runtime = LoadPackagedLibrary(L"flutter_engine.dll", 0);
++    const bool runtime_handle = runtime != nullptr && runtime == library_handle;
++    if (runtime != nullptr) FreeLibrary(runtime);
++    if (runtime_handle && com_alloc) {
++      return reinterpret_cast<void*>(&CoTaskMemAlloc);
++    }
++    if (runtime_handle && com_free) {
++      return reinterpret_cast<void*>(&CoTaskMemFree);
++    }
++  }
++#endif
+   void* result = reinterpret_cast<void*>(
+       GetProcAddress(reinterpret_cast<HMODULE>(library_handle), symbol));
+   if (result == nullptr) {
+diff --git a/runtime/vm/app_snapshot.cc b/runtime/vm/app_snapshot.cc
+index b0bd293e..874a33c2 100644
+--- a/runtime/vm/app_snapshot.cc
++++ b/runtime/vm/app_snapshot.cc
+@@ -1828,7 +1828,8 @@ DART_FORCE_INLINE static CodePtr GetCodeAndEntryPointByIndex(
+   const intptr_t first_entry_with_code =
+       d->instructions_table().rodata()->first_entry_with_code;
+   if (code_index < first_entry_with_code) {
+-    *entry_point = d->instructions_table().EntryPointAt(code_index);
++    *entry_point = Instructions::EntryPointAddress(
++        d->instructions_table().EntryPointAt(code_index));
+     return StubCode::UnknownDartCode().ptr();
+   } else {
+     const intptr_t cluster_index = code_index - first_entry_with_code;
+@@ -9452,9 +9453,10 @@ void Deserializer::ReadInstructions(CodePtr code, bool deferred) {
+   const uword monomorphic_entry_offset =
+       has_monomorphic_entrypoint ? Instructions::kMonomorphicEntryOffsetAOT : 0;
+ 
+-  const uword entry_point = payload_start + entry_offset;
++  const uword entry_point =
++      Instructions::EntryPointAddress(payload_start + entry_offset);
+   const uword monomorphic_entry_point =
+-      payload_start + monomorphic_entry_offset;
++      Instructions::EntryPointAddress(payload_start + monomorphic_entry_offset);
+ 
+   instructions_table_.SetCodeAt(instructions_index_++, code);
+ 
+diff --git a/runtime/vm/code_patcher_arm.cc b/runtime/vm/code_patcher_arm.cc
+index 421adcfe..cdffa879 100644
+--- a/runtime/vm/code_patcher_arm.cc
++++ b/runtime/vm/code_patcher_arm.cc
+@@ -9,11 +9,14 @@
+ 
+ #include "vm/instructions.h"
+ #include "vm/object.h"
++#include "vm/thread.h"
+ 
+ namespace dart {
+ 
++
+ CodePtr CodePatcher::GetStaticCallTargetAt(uword return_address,
+                                            const Code& code) {
++  return_address = Instructions::ReturnAddressForMetadata(return_address);
+   ASSERT(code.ContainsInstructionAt(return_address));
+   CallPattern call(return_address, code);
+   return call.TargetCode();
+@@ -22,6 +25,7 @@ CodePtr CodePatcher::GetStaticCallTargetAt(uword return_address,
+ void CodePatcher::PatchStaticCallAt(uword return_address,
+                                     const Code& code,
+                                     const Code& new_target) {
++  return_address = Instructions::ReturnAddressForMetadata(return_address);
+   ASSERT(code.ContainsInstructionAt(return_address));
+   CallPattern call(return_address, code);
+   call.SetTargetCode(new_target);
+@@ -30,6 +34,7 @@ void CodePatcher::PatchStaticCallAt(uword return_address,
+ void CodePatcher::PatchPoolPointerCallAt(uword return_address,
+                                          const Code& code,
+                                          const Code& new_target) {
++  return_address = Instructions::ReturnAddressForMetadata(return_address);
+   ASSERT(code.ContainsInstructionAt(return_address));
+   CallPattern call(return_address, code);
+   call.SetTargetCode(new_target);
+@@ -38,6 +43,7 @@ void CodePatcher::PatchPoolPointerCallAt(uword return_address,
+ CodePtr CodePatcher::GetInstanceCallAt(uword return_address,
+                                        const Code& caller_code,
+                                        Object* data) {
++  return_address = Instructions::ReturnAddressForMetadata(return_address);
+   ASSERT(caller_code.ContainsInstructionAt(return_address));
+   ICCallPattern call(return_address, caller_code);
+   if (data != nullptr) {
+@@ -63,6 +69,7 @@ void CodePatcher::PatchInstanceCallAtWithMutatorsStopped(
+     const Code& caller_code,
+     const Object& data,
+     const Code& target) {
++  return_address = Instructions::ReturnAddressForMetadata(return_address);
+   ASSERT(caller_code.ContainsInstructionAt(return_address));
+   ICCallPattern call(return_address, caller_code);
+   call.SetData(data);
+@@ -72,6 +79,7 @@ void CodePatcher::PatchInstanceCallAtWithMutatorsStopped(
+ FunctionPtr CodePatcher::GetUnoptimizedStaticCallAt(uword return_address,
+                                                     const Code& caller_code,
+                                                     ICData* ic_data_result) {
++  return_address = Instructions::ReturnAddressForMetadata(return_address);
+   ASSERT(caller_code.ContainsInstructionAt(return_address));
+   ICCallPattern static_call(return_address, caller_code);
+   ICData& ic_data = ICData::Handle();
+@@ -86,6 +94,7 @@ void CodePatcher::PatchSwitchableCallAt(uword return_address,
+                                         const Code& caller_code,
+                                         const Object& data,
+                                         const Code& target) {
++  return_address = Instructions::ReturnAddressForMetadata(return_address);
+   // First update target to a stub that does not read 'data' so that concurrent
+   // Dart execution cannot observe the new stub with the old data or the old
+   // stub with the new data.
+@@ -114,6 +123,7 @@ ObjectPtr CodePatcher::GetSwitchableCallTargetAt(uword return_address,
+ 
+ uword CodePatcher::GetSwitchableCallTargetEntryAt(uword return_address,
+                                                   const Code& caller_code) {
++  return_address = Instructions::ReturnAddressForMetadata(return_address);
+   if (FLAG_precompiled_mode) {
+     BareSwitchableCallPattern call(return_address);
+     return call.target_entry();
+@@ -124,6 +134,7 @@ uword CodePatcher::GetSwitchableCallTargetEntryAt(uword return_address,
+ 
+ ObjectPtr CodePatcher::GetSwitchableCallDataAt(uword return_address,
+                                                const Code& caller_code) {
++  return_address = Instructions::ReturnAddressForMetadata(return_address);
+   if (FLAG_precompiled_mode) {
+     BareSwitchableCallPattern call(return_address);
+     return call.data();
+@@ -137,6 +148,7 @@ void CodePatcher::PatchNativeCallAt(uword return_address,
+                                     const Code& code,
+                                     NativeFunction target,
+                                     const Code& trampoline) {
++  return_address = Instructions::ReturnAddressForMetadata(return_address);
+   Thread::Current()->isolate_group()->RunWithStoppedMutators([&]() {
+     ASSERT(code.ContainsInstructionAt(return_address));
+     NativeCallPattern call(return_address, code);
+@@ -148,6 +160,7 @@ void CodePatcher::PatchNativeCallAt(uword return_address,
+ CodePtr CodePatcher::GetNativeCallAt(uword return_address,
+                                      const Code& code,
+                                      NativeFunction* target) {
++  return_address = Instructions::ReturnAddressForMetadata(return_address);
+   ASSERT(code.ContainsInstructionAt(return_address));
+   NativeCallPattern call(return_address, code);
+   *target = call.native_function();
+diff --git a/runtime/vm/compiler/asm_intrinsifier_arm.cc b/runtime/vm/compiler/asm_intrinsifier_arm.cc
+index dd412e75..0fabdf48 100644
+--- a/runtime/vm/compiler/asm_intrinsifier_arm.cc
++++ b/runtime/vm/compiler/asm_intrinsifier_arm.cc
+@@ -285,7 +285,12 @@ void AsmIntrinsifier::Bigint_lsh(Assembler* assembler, Label* normal_ir_body) {
+   Label loop;
+   __ Bind(&loop);
+   __ ldr(R4, Address(R2, -kBytesPerBigIntDigit, Address::PreIndex));
++#if defined(DART_TARGET_OS_WINDOWS)
++  __ mov(IP, Operand(R4, LSR, R0));
++  __ orr(R9, R9, Operand(IP));
++#else
+   __ orr(R9, R9, Operand(R4, LSR, R0));
++#endif
+   __ str(R9, Address(R6, -kBytesPerBigIntDigit, Address::PreIndex));
+   __ mov(R9, Operand(R4, LSL, R1));
+   __ teq(R2, Operand(R8));
+@@ -327,7 +332,12 @@ void AsmIntrinsifier::Bigint_rsh(Assembler* assembler, Label* normal_ir_body) {
+   Label loop;
+   __ Bind(&loop);
+   __ ldr(R4, Address(R2, kBytesPerBigIntDigit, Address::PostIndex));
++#if defined(DART_TARGET_OS_WINDOWS)
++  __ mov(IP, Operand(R4, LSL, R0));
++  __ orr(R9, R9, Operand(IP));
++#else
+   __ orr(R9, R9, Operand(R4, LSL, R0));
++#endif
+   __ str(R9, Address(R6, kBytesPerBigIntDigit, Address::PostIndex));
+   __ mov(R9, Operand(R4, LSR, R1));
+   __ Bind(&loop_entry);
+diff --git a/runtime/vm/compiler/assembler/assembler_arm.cc b/runtime/vm/compiler/assembler/assembler_arm.cc
+index f61af5df..6414b7f0 100644
+--- a/runtime/vm/compiler/assembler/assembler_arm.cc
++++ b/runtime/vm/compiler/assembler/assembler_arm.cc
+@@ -79,6 +79,15 @@ void Assembler::EmitType01(Condition cond,
+                            Operand o) {
+   ASSERT(rd != kNoRegister);
+   ASSERT(cond != kNoCondition);
++#if defined(DART_TARGET_OS_WINDOWS)
++  if (cond != AL) {
++    Label skip;
++    b(&skip, InvertCondition(cond));
++    EmitType01(AL, type, opcode, set_cc, rn, rd, o);
++    Bind(&skip);
++    return;
++  }
++#endif
+   int32_t encoding =
+       static_cast<int32_t>(cond) << kConditionShift | type << kTypeShift |
+       static_cast<int32_t>(opcode) << kOpcodeShift | set_cc << kSShift |
+@@ -103,6 +112,15 @@ void Assembler::EmitMemOp(Condition cond,
+   ASSERT(cond != kNoCondition);
+   // Unpredictable, illegal on some microarchitectures.
+   ASSERT(!ad.has_writeback() || (ad.rn() != rd));
++#if defined(DART_TARGET_OS_WINDOWS)
++  if (cond != AL) {
++    Label skip;
++    b(&skip, InvertCondition(cond));
++    EmitMemOp(AL, load, byte, rd, ad);
++    Bind(&skip);
++    return;
++  }
++#endif
+ 
+   int32_t encoding = (static_cast<int32_t>(cond) << kConditionShift) | B26 |
+                      (ad.kind() == Address::Immediate ? 0 : B25) |
+@@ -119,6 +137,15 @@ void Assembler::EmitMemOpAddressMode3(Condition cond,
+   ASSERT(cond != kNoCondition);
+   // Unpredictable, illegal on some microarchitectures.
+   ASSERT(!ad.has_writeback() || (ad.rn() != rd));
++#if defined(DART_TARGET_OS_WINDOWS)
++  if (cond != AL) {
++    Label skip;
++    b(&skip, InvertCondition(cond));
++    EmitMemOpAddressMode3(AL, mode, rd, ad);
++    Bind(&skip);
++    return;
++  }
++#endif
+ 
+   int32_t encoding = (static_cast<int32_t>(cond) << kConditionShift) | mode |
+                      ArmEncode::Rd(rd) | ad.encoding3();
+@@ -427,10 +454,49 @@ void Assembler::udiv(Register rd, Register rn, Register rm, Condition cond) {
+ }
+ 
+ void Assembler::ldr(Register rd, Address ad, Condition cond) {
++#if defined(DART_TARGET_OS_WINDOWS)
++  if ((ad.kind() == Address::Immediate) && !ad.has_writeback() &&
++      (ad.mode() == Address::NegOffset) && (ad.offset() < -0xff) &&
++      (((rd == ad.base()) && (rd != PC)) ||
++       ((ad.base() == FP) && (rd != IP)))) {
++    if (cond != AL) {
++      Label skip;
++      b(&skip, InvertCondition(cond));
++      ldr(rd, ad, AL);
++      Bind(&skip);
++      return;
++    }
++    if (rd == ad.base()) {
++      const int32_t offset = ad.offset();
++      AddImmediate(rd, rd, offset & ~0xff);
++      EmitMemOp(AL, true, false, rd, Address(rd, offset & 0xff));
++    } else {
++      AddImmediate(IP, ad.base(), ad.offset());
++      EmitMemOp(AL, true, false, rd, Address(IP, 0));
++    }
++    return;
++  }
++#endif
+   EmitMemOp(cond, true, false, rd, ad);
+ }
+ 
+ void Assembler::str(Register rd, Address ad, Condition cond) {
++#if defined(DART_TARGET_OS_WINDOWS)
++  if ((ad.kind() == Address::Immediate) && !ad.has_writeback() &&
++      (ad.mode() == Address::NegOffset) && (ad.offset() < -0xff) &&
++      (ad.base() == FP) && (rd != IP)) {
++    if (cond != AL) {
++      Label skip;
++      b(&skip, InvertCondition(cond));
++      str(rd, ad, AL);
++      Bind(&skip);
++      return;
++    }
++    AddImmediate(IP, ad.base(), ad.offset());
++    EmitMemOp(AL, false, false, rd, Address(IP, 0));
++    return;
++  }
++#endif
+   EmitMemOp(cond, false, false, rd, ad);
+ }
+ 
+@@ -463,6 +529,21 @@ void Assembler::ldrd(Register rd,
+                      Register rn,
+                      int32_t offset,
+                      Condition cond) {
++#if defined(DART_TARGET_OS_WINDOWS)
++  if ((offset & 3) != 0) {
++    ASSERT((rd % 2) == 0);
++    ASSERT(rd2 == rd + 1);
++    // Preserve the address until both words have been loaded when rd is rn.
++    if (rd == rn) {
++      ldr(rd2, Address(rn, offset + 4), cond);
++      ldr(rd, Address(rn, offset), cond);
++    } else {
++      ldr(rd, Address(rn, offset), cond);
++      ldr(rd2, Address(rn, offset + 4), cond);
++    }
++    return;
++  }
++#endif
+   ASSERT((rd % 2) == 0);
+   ASSERT(rd2 == rd + 1);
+   EmitMemOpAddressMode3(cond, B7 | B6 | B4, rd, Address(rn, offset));
+@@ -568,6 +649,15 @@ void Assembler::ubfx(Register rd,
+                      int32_t lsb,
+                      int32_t width,
+                      Condition cond) {
++#if defined(DART_TARGET_OS_WINDOWS)
++  if (cond != AL) {
++    Label skip;
++    b(&skip, InvertCondition(cond));
++    ubfx(rd, rn, lsb, width, AL);
++    Bind(&skip);
++    return;
++  }
++#endif
+   const bool sign_extend = false;
+   Emit(BitFieldExtractEncoding(sign_extend, rd, rn, lsb, width, cond));
+ }
+@@ -844,6 +934,15 @@ void Assembler::vmovrrd(Register rt,
+                         Register rt2,
+                         DRegister dm,
+                         Condition cond) {
++#if defined(DART_TARGET_OS_WINDOWS)
++  if (cond != AL) {
++    Label skip;
++    b(&skip, InvertCondition(cond));
++    vmovrrd(rt, rt2, dm, AL);
++    Bind(&skip);
++    return;
++  }
++#endif
+   ASSERT(dm != kNoDRegister);
+   ASSERT(rt != kNoRegister);
+   ASSERT(rt != SP);
+@@ -1008,6 +1107,15 @@ void Assembler::EmitVFPddd(Condition cond,
+                            DRegister dd,
+                            DRegister dn,
+                            DRegister dm) {
++#if defined(DART_TARGET_OS_WINDOWS)
++  if (cond != AL) {
++    Label skip;
++    b(&skip, InvertCondition(cond));
++    EmitVFPddd(AL, opcode, dd, dn, dm);
++    Bind(&skip);
++    return;
++  }
++#endif
+   ASSERT(dd != kNoDRegister);
+   ASSERT(dn != kNoDRegister);
+   ASSERT(dm != kNoDRegister);
+@@ -1534,6 +1642,15 @@ void Assembler::bl(Label* label, Condition cond) {
+ }
+ 
+ void Assembler::bx(Register rm, Condition cond) {
++#if defined(DART_TARGET_OS_WINDOWS)
++  if (cond != AL) {
++    Label skip;
++    b(&skip, InvertCondition(cond));
++    bx(rm, AL);
++    Bind(&skip);
++    return;
++  }
++#endif
+   ASSERT(rm != kNoRegister);
+   ASSERT(cond != kNoCondition);
+   int32_t encoding = (static_cast<int32_t>(cond) << kConditionShift) | B24 |
+@@ -1542,6 +1659,15 @@ void Assembler::bx(Register rm, Condition cond) {
+ }
+ 
+ void Assembler::blx(Register rm, Condition cond) {
++#if defined(DART_TARGET_OS_WINDOWS)
++  if (cond != AL) {
++    Label skip;
++    b(&skip, InvertCondition(cond));
++    blx(rm, AL);
++    Bind(&skip);
++    return;
++  }
++#endif
+   ASSERT(rm != kNoRegister);
+   ASSERT(cond != kNoCondition);
+   int32_t encoding = (static_cast<int32_t>(cond) << kConditionShift) | B24 |
+@@ -2747,6 +2873,19 @@ void Assembler::LoadImmediate(Register rd, Immediate value, Condition cond) {
+ }
+ 
+ void Assembler::LoadImmediate(Register rd, int32_t value, Condition cond) {
++#if defined(DART_TARGET_OS_WINDOWS)
++  if ((value < 0) || (value > 0xff)) {
++    if (cond != AL) {
++      Label skip;
++      b(&skip, InvertCondition(cond));
++      LoadDecodableImmediate(rd, value, AL);
++      Bind(&skip);
++      return;
++    }
++    LoadDecodableImmediate(rd, value, cond);
++    return;
++  }
++#endif
+   Operand o;
+   if (Operand::CanHold(value, &o)) {
+     mov(rd, o, cond);
+@@ -2978,6 +3117,20 @@ void Assembler::AddImmediate(Register rd,
+                              Register rn,
+                              int32_t value,
+                              Condition cond) {
++#if defined(DART_TARGET_OS_WINDOWS)
++  if ((rd == SP) && (rn == FP)) {
++    if (cond != AL) {
++      Label skip;
++      b(&skip, InvertCondition(cond));
++      AddImmediate(rd, rn, value, AL);
++      Bind(&skip);
++      return;
++    }
++    mov(SP, Operand(FP));
++    AddImmediate(SP, SP, value, AL);
++    return;
++  }
++#endif
+   if (value == 0) {
+     if (rd != rn) {
+       mov(rd, Operand(rn), cond);
+@@ -3131,6 +3284,14 @@ void Assembler::XorImmediate(Register rd,
+ }
+ 
+ void Assembler::CompareImmediate(Register rn, int32_t value, Condition cond) {
++#if defined(DART_TARGET_OS_WINDOWS)
++  if ((value < 0) || (value > 0xff)) {
++    ASSERT(rn != IP);
++    LoadImmediate(IP, value, cond);
++    cmp(rn, Operand(IP), cond);
++    return;
++  }
++#endif
+   Operand o;
+   if (Operand::CanHold(value, &o)) {
+     cmp(rn, o, cond);
+@@ -3234,7 +3395,12 @@ void Assembler::LeaveFrame(RegList regs, bool allow_pop_pc) {
+   ASSERT(allow_pop_pc || (regs & (1 << PC)) == 0);  // Must not pop PC.
+   if ((regs & (1 << FP)) != 0) {
+     // Use FP to set SP.
++#if defined(DART_TARGET_OS_WINDOWS)
++    mov(SP, Operand(FP));
++    sub(SP, SP, Operand(4 * NumRegsBelowFP(regs)));
++#else
+     sub(SP, FP, Operand(4 * NumRegsBelowFP(regs)));
++#endif
+   }
+   PopList(regs);
+ }
+@@ -3252,7 +3418,13 @@ void Assembler::ReserveAlignedFrameSpace(intptr_t frame_space) {
+   // the C++ world.
+   AddImmediate(SP, -frame_space);
+   if (OS::ActivationFrameAlignment() > 1) {
++#if defined(DART_TARGET_OS_WINDOWS)
++    mov(TMP, Operand(SP));
++    bic(TMP, TMP, Operand(OS::ActivationFrameAlignment() - 1));
++    mov(SP, Operand(TMP));
++#else
+     bic(SP, SP, Operand(OS::ActivationFrameAlignment() - 1));
++#endif
+   }
+ }
+ 
+@@ -3705,6 +3877,15 @@ void Assembler::CopyMemoryWords(Register src,
+ 
+ void Assembler::GenerateUnRelocatedPcRelativeCall(Condition cond,
+                                                   intptr_t offset_into_target) {
++#if defined(DART_TARGET_OS_WINDOWS)
++  if (cond != AL) {
++    Label skip;
++    b(&skip, InvertCondition(cond));
++    GenerateUnRelocatedPcRelativeCall(AL, offset_into_target);
++    Bind(&skip);
++    return;
++  }
++#endif
+   // Emit "blr.cond <offset>".
+   EmitType5(cond, 0x686868, /*link=*/true);
+ 
+@@ -3812,6 +3993,19 @@ Address Assembler::ElementAddressForRegIndex(bool is_load,
+   ASSERT(array != IP);
+   ASSERT(index != IP);
+   const Register base = is_load ? IP : index;
++#if defined(DART_TARGET_OS_WINDOWS)
++  if (shift < 0) {
++    ASSERT(shift == -1);
++    add(base, array, Operand(index, ASR, 1));
++    int32_t offset_mask = 0;
++    if ((is_load && !Address::CanHoldLoadOffset(size, offset, &offset_mask)) ||
++        (!is_load && !Address::CanHoldStoreOffset(size, offset, &offset_mask))) {
++      AddImmediate(base, offset & ~offset_mask);
++      offset &= offset_mask;
++    }
++    return Address(base, offset);
++  }
++#endif
+   if ((offset != 0) || (is_load && (size == kByte || size == kUnsignedByte)) ||
+       (size == kTwoBytes) || (size == kUnsignedTwoBytes) || (size == kSWord) ||
+       (size == kDWord) || (size == kRegList)) {
+diff --git a/runtime/vm/compiler/backend/il_arm.cc b/runtime/vm/compiler/backend/il_arm.cc
+index fef676cd..6822400c 100644
+--- a/runtime/vm/compiler/backend/il_arm.cc
++++ b/runtime/vm/compiler/backend/il_arm.cc
+@@ -6526,7 +6526,12 @@ static void EmitShiftInt64ByRegister(FlowGraphCompiler* compiler,
+       __ sub(IP, right, compiler::Operand(32), MI);
+       __ mov(out_lo, compiler::Operand(left_hi, ASR, IP), MI);
+       __ mov(out_lo, compiler::Operand(left_lo, LSR, right), PL);
++#if defined(DART_TARGET_OS_WINDOWS)
++      __ mov(IP, compiler::Operand(left_hi, LSL, IP), PL);
++      __ orr(out_lo, out_lo, compiler::Operand(IP), PL);
++#else
+       __ orr(out_lo, out_lo, compiler::Operand(left_hi, LSL, IP), PL);
++#endif
+       __ mov(out_hi, compiler::Operand(left_hi, ASR, right));
+       break;
+     }
+@@ -6535,7 +6540,12 @@ static void EmitShiftInt64ByRegister(FlowGraphCompiler* compiler,
+       __ sub(IP, right, compiler::Operand(32), MI);
+       __ mov(out_lo, compiler::Operand(left_hi, LSR, IP), MI);
+       __ mov(out_lo, compiler::Operand(left_lo, LSR, right), PL);
++#if defined(DART_TARGET_OS_WINDOWS)
++      __ mov(IP, compiler::Operand(left_hi, LSL, IP), PL);
++      __ orr(out_lo, out_lo, compiler::Operand(IP), PL);
++#else
+       __ orr(out_lo, out_lo, compiler::Operand(left_hi, LSL, IP), PL);
++#endif
+       __ mov(out_hi, compiler::Operand(left_hi, LSR, right));
+       break;
+     }
+@@ -6544,7 +6554,12 @@ static void EmitShiftInt64ByRegister(FlowGraphCompiler* compiler,
+       __ sub(IP, right, compiler::Operand(32), MI);
+       __ mov(out_hi, compiler::Operand(left_lo, LSL, IP), MI);
+       __ mov(out_hi, compiler::Operand(left_hi, LSL, right), PL);
++#if defined(DART_TARGET_OS_WINDOWS)
++      __ mov(IP, compiler::Operand(left_lo, LSR, IP), PL);
++      __ orr(out_hi, out_hi, compiler::Operand(IP), PL);
++#else
+       __ orr(out_hi, out_hi, compiler::Operand(left_lo, LSR, IP), PL);
++#endif
+       __ mov(out_lo, compiler::Operand(left_lo, LSL, right));
+       break;
+     }
+@@ -7075,6 +7090,11 @@ void IndirectGotoInstr::EmitNativeCode(FlowGraphCompiler* compiler) {
+ 
+   __ add(target_address_reg, target_address_reg, compiler::Operand(offset_reg));
+ 
++#if defined(DART_TARGET_OS_WINDOWS) && defined(DART_PRECOMPILER)
++  // Label offsets remain byte offsets; the computed AOT code pointer is Thumb.
++  __ orr(target_address_reg, target_address_reg, compiler::Operand(1));
++#endif
++
+   // Jump to the absolute address.
+   __ bx(target_address_reg);
+ }
+diff --git a/runtime/vm/compiler/ffi/abi.h b/runtime/vm/compiler/ffi/abi.h
+index ff917bf5..c17329a5 100644
+--- a/runtime/vm/compiler/ffi/abi.h
++++ b/runtime/vm/compiler/ffi/abi.h
+@@ -42,9 +42,11 @@ enum class Abi {
+   kWindowsArm64,
+   kWindowsIA32,
+   kWindowsX64,
++  // Append to preserve every existing ABI index.
++  kWindowsArm,
+ };
+ 
+-const int64_t num_abis = static_cast<int64_t>(Abi::kWindowsX64) + 1;
++const int64_t num_abis = static_cast<int64_t>(Abi::kWindowsArm) + 1;
+ 
+ // We use the integer values of this enum in
+ // - runtime/vm/compiler/ffi/native_type.cc
+@@ -53,7 +55,9 @@ static_assert(static_cast<int64_t>(Abi::kAndroidArm) == 0,
+               "Enum value unexpected.");
+ static_assert(static_cast<int64_t>(Abi::kWindowsX64) == 21,
+               "Enum value unexpected.");
+-static_assert(num_abis == 22, "Enum value unexpected.");
++static_assert(static_cast<int64_t>(Abi::kWindowsArm) == 22,
++              "Enum value unexpected.");
++static_assert(num_abis == 23, "Enum value unexpected.");
+ 
+ // The target ABI. Defines sizes and alignment of native types.
+ Abi TargetAbi();
+diff --git a/runtime/vm/compiler/runtime_offsets_extracted.h b/runtime/vm/compiler/runtime_offsets_extracted.h
+index e2cc04a0..e19b373e 100644
+--- a/runtime/vm/compiler/runtime_offsets_extracted.h
++++ b/runtime/vm/compiler/runtime_offsets_extracted.h
+@@ -71,7 +71,12 @@ static constexpr dart::compiler::target::word
+ static constexpr dart::compiler::target::word
+     Instructions_kMonomorphicEntryOffsetAOT = 0x0;
+ static constexpr dart::compiler::target::word
+-    Instructions_kPolymorphicEntryOffsetAOT = 0x10;
++    Instructions_kPolymorphicEntryOffsetAOT = 
++#if defined(DART_TARGET_OS_WINDOWS)
++    0x14;
++#else
++    0x10;
++#endif
+ static constexpr dart::compiler::target::word
+     Instructions_kBarePayloadAlignment = 0x4;
+ static constexpr dart::compiler::target::word
+@@ -5819,7 +5824,12 @@ static constexpr dart::compiler::target::word
+ static constexpr dart::compiler::target::word
+     Instructions_kMonomorphicEntryOffsetAOT = 0x0;
+ static constexpr dart::compiler::target::word
+-    Instructions_kPolymorphicEntryOffsetAOT = 0x10;
++    Instructions_kPolymorphicEntryOffsetAOT = 
++#if defined(DART_TARGET_OS_WINDOWS)
++    0x14;
++#else
++    0x10;
++#endif
+ static constexpr dart::compiler::target::word
+     Instructions_kBarePayloadAlignment = 0x4;
+ static constexpr dart::compiler::target::word
+@@ -11511,7 +11521,12 @@ static constexpr dart::compiler::target::word
+ static constexpr dart::compiler::target::word
+     AOT_Instructions_kMonomorphicEntryOffsetAOT = 0x0;
+ static constexpr dart::compiler::target::word
+-    AOT_Instructions_kPolymorphicEntryOffsetAOT = 0x10;
++    AOT_Instructions_kPolymorphicEntryOffsetAOT = 
++#if defined(DART_TARGET_OS_WINDOWS)
++    0x14;
++#else
++    0x10;
++#endif
+ static constexpr dart::compiler::target::word
+     AOT_Instructions_kBarePayloadAlignment = 0x4;
+ static constexpr dart::compiler::target::word
+@@ -17101,7 +17116,12 @@ static constexpr dart::compiler::target::word
+ static constexpr dart::compiler::target::word
+     AOT_Instructions_kMonomorphicEntryOffsetAOT = 0x0;
+ static constexpr dart::compiler::target::word
+-    AOT_Instructions_kPolymorphicEntryOffsetAOT = 0x10;
++    AOT_Instructions_kPolymorphicEntryOffsetAOT = 
++#if defined(DART_TARGET_OS_WINDOWS)
++    0x14;
++#else
++    0x10;
++#endif
+ static constexpr dart::compiler::target::word
+     AOT_Instructions_kBarePayloadAlignment = 0x4;
+ static constexpr dart::compiler::target::word
+diff --git a/runtime/vm/compiler/stub_code_compiler.cc b/runtime/vm/compiler/stub_code_compiler.cc
+index 23a4280a..dfa3d589 100644
+--- a/runtime/vm/compiler/stub_code_compiler.cc
++++ b/runtime/vm/compiler/stub_code_compiler.cc
+@@ -2010,7 +2010,12 @@ void StubCodeCompiler::GenerateSuspendStub(
+   __ AddImmediate(
+       kFrameSize, FPREG,
+       -target::frame_layout.last_param_from_entry_sp * target::kWordSize);
++#if defined(TARGET_ARCH_ARM) && defined(DART_TARGET_OS_WINDOWS)
++  __ MoveRegister(TMP, SPREG);
++  __ SubRegisters(kFrameSize, TMP);
++#else
+   __ SubRegisters(kFrameSize, SPREG);
++#endif
+ 
+   __ EnterStubFrame();
+ 
+diff --git a/runtime/vm/compiler/stub_code_compiler_arm.cc b/runtime/vm/compiler/stub_code_compiler_arm.cc
+index 6d0a7e38..61c068dc 100644
+--- a/runtime/vm/compiler/stub_code_compiler_arm.cc
++++ b/runtime/vm/compiler/stub_code_compiler_arm.cc
+@@ -304,7 +304,12 @@ void StubCodeCompiler::GenerateLoadFfiCallbackMetadataRuntimeFunction(
+ 
+   // Load a pointer to the beginning of the stub into dst.
+   const intptr_t code_size = __ CodeSize();
++#if defined(DART_TARGET_OS_WINDOWS)
++  __ mov(dst, Operand(PC));
++  __ SubImmediate(dst, dst, Instr::kPCReadOffset + code_size);
++#else
+   __ SubImmediate(dst, PC, Instr::kPCReadOffset + code_size);
++#endif
+ 
+   // Round dst down to the page size.
+   __ AndImmediate(dst, dst, FfiCallbackMetadata::kPageMask);
+@@ -858,6 +863,15 @@ static void GenerateDeoptimizationSequence(Assembler* assembler,
+       // instead of the value used to call this stub.
+       __ ldr(IP, Address(FP, 2 * target::kWordSize));
+       __ Push(IP);
++#if defined(DART_TARGET_OS_WINDOWS)
++    } else if (i == PC) {
++      // Preserve IP, which will be saved by a later iteration of this loop.
++      __ Push(IP);
++      __ Push(IP);
++      __ mov(IP, Operand(PC));
++      __ str(IP, Address(SP, target::kWordSize));
++      __ Pop(IP);
++#endif
+     } else if (i == SP) {
+       // Push(SP) has unpredictable behavior.
+       __ mov(IP, Operand(SP));
+@@ -898,7 +912,13 @@ static void GenerateDeoptimizationSequence(Assembler* assembler,
+ 
+   __ RestoreCodePointer();
+   __ LeaveDartFrame();
++#if defined(DART_TARGET_OS_WINDOWS)
++  __ mov(IP, Operand(FP));
++  __ sub(IP, IP, Operand(R0));
++  __ mov(SP, Operand(IP));
++#else
+   __ sub(SP, FP, Operand(R0));
++#endif
+ 
+   // DeoptimizeFillFrame expects a Dart frame, i.e. EnterDartFrame(0), but there
+   // is no need to set the correct PC marker or load PP, since they get patched.
+diff --git a/runtime/vm/cpu_arm.cc b/runtime/vm/cpu_arm.cc
+index d40147b2..54f7c12c 100644
+--- a/runtime/vm/cpu_arm.cc
++++ b/runtime/vm/cpu_arm.cc
+@@ -129,7 +129,8 @@ void HostCPUFeatures::Init() {
+ }
+ #elif DART_HOST_OS_WINDOWS
+ void HostCPUFeatures::Init() {
+-  hardware_ = "";
++  // Cleanup owns and frees this string, just as it does on other platforms.
++  hardware_ = Utils::StrDup("");
+   integer_division_supported_ = true;
+   neon_supported_ = true;
+   hardfp_supported_ = true;
+diff --git a/runtime/vm/instructions_arm.cc b/runtime/vm/instructions_arm.cc
+index de009e20..bc83c07d 100644
+--- a/runtime/vm/instructions_arm.cc
++++ b/runtime/vm/instructions_arm.cc
+@@ -16,6 +16,40 @@
+ 
+ namespace dart {
+ 
++static bool IsGeneratedBlxRegisterAt(uword pc, int32_t register_code) {
++#if defined(DART_PRECOMPILED_RUNTIME) && defined(DART_TARGET_OS_WINDOWS)
++  const uint16_t instruction = *reinterpret_cast<const uint16_t*>(pc);
++  return (instruction & 0xff87) == 0x4780 &&
++         ((instruction >> 3) & 0xf) == register_code;
++#else
++  return *reinterpret_cast<const uint32_t*>(pc) ==
++         (0xe12fff30 | static_cast<uint32_t>(register_code));
++#endif
++}
++
++#if defined(DART_PRECOMPILED_RUNTIME) && defined(DART_TARGET_OS_WINDOWS)
++static bool DecodeThumbMovImmediate(uword pc, uint16_t opcode,
++                                    Register* reg, uint32_t* immediate) {
++  const uint16_t first = *reinterpret_cast<const uint16_t*>(pc);
++  const uint16_t second = *(reinterpret_cast<const uint16_t*>(pc) + 1);
++  if ((first & 0xfbf0) != opcode || (second & 0x8000) != 0) return false;
++  *reg = static_cast<Register>((second >> 8) & 0xf);
++  *immediate = ((first & 0xf) << 12) | ((first & 0x0400) << 1) |
++               ((second & 0x7000) >> 4) | (second & 0xff);
++  return true;
++}
++
++static uint32_t EncodeThumbMovImmediate(uint16_t opcode, Register reg,
++                                        uint16_t immediate) {
++  const uint16_t first = opcode | ((immediate >> 12) & 0xf) |
++                         ((immediate & 0x0800) >> 1);
++  const uint16_t second = ((immediate & 0x0700) << 4) |
++                          (static_cast<uint16_t>(reg) << 8) |
++                          (immediate & 0xff);
++  return first | (static_cast<uint32_t>(second) << 16);
++}
++#endif
++
+ static bool IsBranchLinkScratch(Register reg) {
+   // See Assembler::BranchLink
+   return FLAG_precompiled_mode ? reg == LINK_REGISTER : reg == CODE_REG;
+@@ -26,7 +60,7 @@ CallPattern::CallPattern(uword pc, const Code& code)
+       target_code_pool_index_(-1) {
+   ASSERT(code.ContainsInstructionAt(pc));
+   // Last instruction: blx lr.
+-  ASSERT(*(reinterpret_cast<uint32_t*>(pc) - 1) == 0xe12fff3e);
++  ASSERT(IsGeneratedBlxRegisterAt(pc - Instr::kInstrSize, LINK_REGISTER.code));
+ 
+   Register reg;
+   InstructionPattern::DecodeLoadWordFromPool(pc - 2 * Instr::kInstrSize, &reg,
+@@ -40,7 +74,7 @@ ICCallPattern::ICCallPattern(uword pc, const Code& code)
+       data_pool_index_(-1) {
+   ASSERT(code.ContainsInstructionAt(pc));
+   // Last instruction: blx lr.
+-  ASSERT(*(reinterpret_cast<uint32_t*>(pc) - 1) == 0xe12fff3e);
++  ASSERT(IsGeneratedBlxRegisterAt(pc - Instr::kInstrSize, LINK_REGISTER.code));
+ 
+   Register reg;
+   uword target_load_end = InstructionPattern::DecodeLoadWordFromPool(
+@@ -59,7 +93,7 @@ NativeCallPattern::NativeCallPattern(uword pc, const Code& code)
+       target_code_pool_index_(-1) {
+   ASSERT(code.ContainsInstructionAt(pc));
+   // Last instruction: blx lr.
+-  ASSERT(*(reinterpret_cast<uint32_t*>(end_) - 1) == 0xe12fff3e);
++  ASSERT(IsGeneratedBlxRegisterAt(end_ - Instr::kInstrSize, LINK_REGISTER.code));
+ 
+   Register reg;
+   uword native_function_load_end = InstructionPattern::DecodeLoadWordFromPool(
+@@ -99,6 +133,18 @@ uword InstructionPattern::DecodeLoadWordImmediate(uword end,
+                                                   Register* reg,
+                                                   intptr_t* value) {
+   uword start = end - Instr::kInstrSize;
++#if defined(DART_PRECOMPILED_RUNTIME) && defined(DART_TARGET_OS_WINDOWS)
++  uint32_t high = 0;
++  uint32_t low = 0;
++  Register high_reg = kNoRegister;
++  if (DecodeThumbMovImmediate(start, 0xf2c0, &high_reg, &high)) {
++    start -= Instr::kInstrSize;
++  }
++  RELEASE_ASSERT(DecodeThumbMovImmediate(start, 0xf240, reg, &low));
++  RELEASE_ASSERT(high_reg == kNoRegister || high_reg == *reg);
++  *value = static_cast<int32_t>(low | (high << 16));
++  return start;
++#endif
+   int32_t instr = Instr::At(start)->InstructionBits();
+   intptr_t imm = 0;
+   if ((instr & 0xfff00000) == 0xe3400000) {  // movt reg, #imm_hi
+@@ -120,6 +166,14 @@ void InstructionPattern::EncodeLoadWordImmediate(uword end,
+                                                  intptr_t value) {
+   uint16_t low16 = value & 0xffff;
+   uint16_t high16 = (value >> 16) & 0xffff;
++#if defined(DART_PRECOMPILED_RUNTIME) && defined(DART_TARGET_OS_WINDOWS)
++  {
++  uint32_t* cursor = reinterpret_cast<uint32_t*>(end);
++  *(--cursor) = EncodeThumbMovImmediate(0xf2c0, reg, high16);
++  *(--cursor) = EncodeThumbMovImmediate(0xf240, reg, low16);
++  return;
++  }
++#endif
+ 
+   // movw reg, #imm_lo
+   uint32_t movw_instr = 0xe3000000;
+@@ -159,6 +213,69 @@ static bool IsLoadWithOffset(int32_t instr,
+   return false;
+ }
+ 
++#if defined(DART_PRECOMPILED_RUNTIME) && defined(DART_TARGET_OS_WINDOWS)
++static constexpr intptr_t kThumbInstrSize = 2;
++
++static bool IsThumbBlxRegisterAt(uword pc, Register reg) {
++  const uint16_t instr = *reinterpret_cast<uint16_t*>(pc);
++  return ((instr & 0xff87) == 0x4780) &&
++         (((instr >> 3) & 0xf) == static_cast<uint16_t>(reg));
++}
++
++static bool IsThumbBxRegisterAt(uword pc, Register reg) {
++  const uint16_t instr = *reinterpret_cast<uint16_t*>(pc);
++  return ((instr & 0xff87) == 0x4700) &&
++         (((instr >> 3) & 0xf) == static_cast<uint16_t>(reg));
++}
++
++static bool IsThumbAddwLrPcImmediateAt(uword pc) {
++  const uint16_t first = *reinterpret_cast<uint16_t*>(pc);
++  const uint16_t second = *reinterpret_cast<uint16_t*>(pc + kThumbInstrSize);
++  return ((first & 0xfbff) == 0xf20f) &&
++         (((second >> 8) & 0xf) == 14);
++}
++
++static bool IsThumbBranchAndLinkImmediateAt(uword pc) {
++  const uint16_t first = *reinterpret_cast<uint16_t*>(pc);
++  const uint16_t second = *reinterpret_cast<uint16_t*>(pc + kThumbInstrSize);
++  return ((first & 0xf800) == 0xf000) && ((second & 0xc000) == 0xc000);
++}
++
++static intptr_t ThumbExpandImm(uint32_t imm12) {
++  if ((imm12 >> 10) == 0) {
++    const uint32_t imm8 = imm12 & 0xff;
++    switch ((imm12 >> 8) & 0x3) {
++      case 0:
++        return imm8;
++      case 1:
++        return (imm8 << 16) | imm8;
++      case 2:
++        return (imm8 << 24) | (imm8 << 8);
++      case 3:
++        return (imm8 << 24) | (imm8 << 16) | (imm8 << 8) | imm8;
++    }
++  }
++  const uint32_t unrotated = 0x80 | (imm12 & 0x7f);
++  const uint32_t rotate = (imm12 >> 7) & 0x1f;
++  return (unrotated >> rotate) | (unrotated << (32 - rotate));
++}
++
++static bool DecodeThumbAddImmediate(uword start,
++                                    Register* dst,
++                                    Register* base,
++                                    intptr_t* value) {
++  const uint16_t first = *reinterpret_cast<uint16_t*>(start);
++  const uint16_t second = *(reinterpret_cast<uint16_t*>(start) + 1);
++  if ((first & 0xfb00) != 0xf100) return false;
++  *base = static_cast<Register>(first & 0x000f);
++  *dst = static_cast<Register>((second >> 8) & 0x000f);
++  const uint32_t imm12 = ((first & 0x0400) << 1) |
++                         ((second & 0x7000) >> 4) | (second & 0x00ff);
++  *value = ThumbExpandImm(imm12);
++  return true;
++}
++#endif
++
+ // Decodes a load sequence ending at 'end' (the last instruction of the load
+ // sequence is the instruction before the one at end).  Returns a pointer to
+ // the first instruction in the sequence.  Returns the register being loaded
+@@ -172,6 +289,41 @@ uword InstructionPattern::DecodeLoadWordFromPool(uword end,
+   intptr_t offset = 0;
+   if (IsLoadWithOffset(instr, PP, &offset, reg)) {
+     // ldr reg, [PP, #+offset]
++#if defined(DART_PRECOMPILED_RUNTIME) && defined(DART_TARGET_OS_WINDOWS)
++  } else if (((*reinterpret_cast<uint16_t*>(start)) & 0xfff0) == 0xf8d0) {
++    // Fixed-slot Thumb2 lowering keeps each original ARM instruction at the
++    // same 4-byte address, but the bytes are now Thumb2. Decode object-pool
++    // load patterns emitted by the lowering:
++    //   ldr.w Rt, [PP, #imm12]
++    //   add.w Rtmp, PP, #imm; ldr.w Rt, [Rtmp, #imm12]
++    const uint16_t first_halfword = *reinterpret_cast<uint16_t*>(start);
++    const uint16_t second_halfword = *(reinterpret_cast<uint16_t*>(start) + 1);
++    const Register base = static_cast<Register>(first_halfword & 0x000f);
++    *reg = static_cast<Register>((second_halfword >> 12) & 0xf);
++    offset = second_halfword & 0x0fff;
++    if (base != PP) {
++      Register add_dst;
++      Register add_base;
++      intptr_t add_value = 0;
++      const uword add_start = start - Instr::kInstrSize;
++      if (DecodeThumbAddImmediate(add_start, &add_dst, &add_base, &add_value)) {
++        RELEASE_ASSERT(add_base == PP);
++        RELEASE_ASSERT(add_dst == base);
++        start = add_start;
++      } else {
++        const uint16_t add_first = *reinterpret_cast<const uint16_t*>(add_start);
++        const uint16_t add_second = *(reinterpret_cast<const uint16_t*>(add_start) + 1);
++        RELEASE_ASSERT((add_first & 0xfff0) == 0xeb00);
++        RELEASE_ASSERT((add_first & 0xf) == PP);
++        RELEASE_ASSERT((add_second & 0x70f0) == 0);
++        RELEASE_ASSERT(((add_second >> 8) & 0xf) == base);
++        RELEASE_ASSERT((add_second & 0xf) == base);
++        start = DecodeLoadWordImmediate(add_start, &add_dst, &add_value);
++        RELEASE_ASSERT(add_dst == base);
++      }
++      offset += add_value;
++    }
++#endif
+   } else {
+     ASSERT((instr & 0xfff00000) == 0xe5900000);  // ldr reg, [reg, #+offset]
+     offset = instr & 0xfff;
+@@ -256,7 +408,7 @@ SwitchableCallPattern::SwitchableCallPattern(uword pc, const Code& code)
+     : SwitchableCallPatternBase(ObjectPool::Handle(code.GetObjectPool())) {
+   ASSERT(code.ContainsInstructionAt(pc));
+   // Last instruction: blx lr.
+-  ASSERT(*(reinterpret_cast<uint32_t*>(pc) - 1) == 0xe12fff3e);
++  ASSERT(IsGeneratedBlxRegisterAt(pc - Instr::kInstrSize, LINK_REGISTER.code));
+ 
+   Register reg;
+   uword data_load_end = InstructionPattern::DecodeLoadWordFromPool(
+@@ -281,7 +433,7 @@ BareSwitchableCallPattern::BareSwitchableCallPattern(uword pc)
+     : SwitchableCallPatternBase(ObjectPool::Handle(
+           IsolateGroup::Current()->object_store()->global_object_pool())) {
+   // Last instruction: blx lr.
+-  ASSERT(*(reinterpret_cast<uint32_t*>(pc) - 1) == 0xe12fff3e);
++  ASSERT(IsGeneratedBlxRegisterAt(pc - Instr::kInstrSize, LINK_REGISTER.code));
+ 
+   Register reg;
+   uword data_load_end = InstructionPattern::DecodeLoadWordFromPool(
+@@ -294,14 +446,16 @@ BareSwitchableCallPattern::BareSwitchableCallPattern(uword pc)
+ }
+ 
+ uword BareSwitchableCallPattern::target_entry() const {
+-  return object_pool_.RawValueAt(target_pool_index_);
++  return Instructions::EntryPointAddress(
++      object_pool_.RawValueAt(target_pool_index_));
+ }
+ 
+ void BareSwitchableCallPattern::SetTargetRelease(const Code& target) const {
+   ASSERT(object_pool_.TypeAt(target_pool_index_) ==
+          ObjectPool::EntryType::kImmediate);
+   object_pool_.SetRawValueAt<std::memory_order_release>(
+-      target_pool_index_, target.MonomorphicEntryPoint());
++      target_pool_index_, Instructions::EntryPointAddress(
++                              target.MonomorphicEntryPoint()));
+ }
+ 
+ ReturnPattern::ReturnPattern(uword pc) : pc_(pc) {}
+@@ -400,14 +554,36 @@ intptr_t TypeTestingStubCallPattern::GetSubtypeTestCachePoolIndex() {
+ 
+   // Ensure the caller of the type testing stub (whose return address is [pc_])
+   // branched via `blx R9` or a pc-relative call.
++#if defined(DART_PRECOMPILED_RUNTIME) && defined(DART_TARGET_OS_WINDOWS)
++  const uword return_pc = pc_ & ~static_cast<uword>(1);
++  uword pc = return_pc - Instr::kInstrSize;
++  uword load_instr_end = pc;
++  if (!IsThumbBlxRegisterAt(pc, R9) &&
++      !IsThumbBranchAndLinkImmediateAt(pc) &&
++      IsThumbBlxRegisterAt(return_pc - kThumbInstrSize, R9)) {
++    pc = return_pc - kThumbInstrSize;
++    load_instr_end = pc;
++  } else if (!IsThumbBlxRegisterAt(pc, R9) &&
++             !IsThumbBranchAndLinkImmediateAt(pc) &&
++             IsThumbAddwLrPcImmediateAt(return_pc - 2 * Instr::kInstrSize) &&
++             IsThumbBxRegisterAt(return_pc - Instr::kInstrSize, R9)) {
++    pc = return_pc - Instr::kInstrSize;
++    load_instr_end = return_pc - 2 * Instr::kInstrSize;
++  }
++  RELEASE_ASSERT(IsThumbBlxRegisterAt(pc, R9) ||
++                 IsThumbBranchAndLinkImmediateAt(pc) ||
++                 IsThumbBxRegisterAt(pc, R9));
++#else
+   uword pc = pc_ - Instr::kInstrSize;
+   const uint32_t blx_r9 = 0xe12fff39;
+   if (*reinterpret_cast<uint32_t*>(pc) != blx_r9) {
+     PcRelativeCallPattern pattern(pc);
+     RELEASE_ASSERT(pattern.IsValid());
+   }
+-
++#endif
++#if !(defined(DART_PRECOMPILED_RUNTIME) && defined(DART_TARGET_OS_WINDOWS))
+   const uword load_instr_end = pc;
++#endif
+ 
+   Register reg;
+   intptr_t pool_index = -1;
+diff --git a/runtime/vm/isolate.cc b/runtime/vm/isolate.cc
+index af128ea3..08d37a6f 100644
+--- a/runtime/vm/isolate.cc
++++ b/runtime/vm/isolate.cc
+@@ -944,6 +944,7 @@ void IsolateGroup::RunWithCachedCatchEntryMoves(
+     const Code& code,
+     intptr_t pc,
+     std::function<void(const CatchEntryMoves&)> action) {
++  pc = Instructions::ReturnAddressForMetadata(pc);
+   SafepointMutexLocker ml(&cache_mutex_);
+   const CatchEntryMovesRefPtr* ref = catch_entry_moves_cache_.Lookup(pc);
+   if (ref != nullptr) {
+diff --git a/runtime/vm/object.h b/runtime/vm/object.h
+index 5c32b477..229d4d63 100644
+--- a/runtime/vm/object.h
++++ b/runtime/vm/object.h
+@@ -5892,7 +5892,12 @@ class Instructions : public Object {
+   static constexpr intptr_t kMonomorphicEntryOffsetJIT = 0;
+   static constexpr intptr_t kPolymorphicEntryOffsetJIT = 44;
+   static constexpr intptr_t kMonomorphicEntryOffsetAOT = 0;
++#if defined(DART_TARGET_OS_WINDOWS)
++  // Windows ARM AOT uses an explicit branch around the indirect miss branch.
++  static constexpr intptr_t kPolymorphicEntryOffsetAOT = 20;
++#else
+   static constexpr intptr_t kPolymorphicEntryOffsetAOT = 16;
++#endif
+ #elif defined(TARGET_ARCH_ARM64)
+   static constexpr intptr_t kMonomorphicEntryOffsetJIT = 8;
+   static constexpr intptr_t kPolymorphicEntryOffsetJIT = 52;
+@@ -5912,13 +5917,45 @@ class Instructions : public Object {
+ #error Missing entry offsets for current architecture
+ #endif
+ 
++  // Code entry pointers carry instruction-set state; payload addresses do not.
++  static uword EntryPointAddress(uword address) {
++#if defined(TARGET_ARCH_ARM) && defined(DART_TARGET_OS_WINDOWS) && \
++    defined(DART_PRECOMPILED_RUNTIME)
++    return address == 0 ? 0 : (address | static_cast<uword>(1));
++#else
++    return address;
++#endif
++  }
++
++  static uword PayloadAddressFromEntryPoint(uword address) {
++#if defined(TARGET_ARCH_ARM) && defined(DART_TARGET_OS_WINDOWS) && \
++    defined(DART_PRECOMPILED_RUNTIME)
++    return address & ~static_cast<uword>(1);
++#else
++    return address;
++#endif
++  }
++
++  // Stack/PC descriptors retain A32's four-byte slots after Thumb conversion.
++  // BLX-register returns into its slot's padding; retain the physical return
++  // address in frames, and use the logical slot end only for metadata queries.
++  static uword ReturnAddressForMetadata(uword address) {
++#if defined(TARGET_ARCH_ARM) && defined(DART_TARGET_OS_WINDOWS) && \
++    defined(DART_PRECOMPILED_RUNTIME)
++    const uword pc = PayloadAddressFromEntryPoint(address);
++    return (pc + static_cast<uword>(2)) & ~static_cast<uword>(3);
++#else
++    return address;
++#endif
++  }
++
+   static uword MonomorphicEntryPoint(const InstructionsPtr instr) {
+     uword entry = PayloadStart(instr);
+     if (HasMonomorphicEntry(instr)) {
+       entry += !FLAG_precompiled_mode ? kMonomorphicEntryOffsetJIT
+                                       : kMonomorphicEntryOffsetAOT;
+     }
+-    return entry;
++    return EntryPointAddress(entry);
+   }
+ 
+   static uword EntryPoint(const InstructionsPtr instr) {
+@@ -5927,7 +5964,7 @@ class Instructions : public Object {
+       entry += !FLAG_precompiled_mode ? kPolymorphicEntryOffsetJIT
+                                       : kPolymorphicEntryOffsetAOT;
+     }
+-    return entry;
++    return EntryPointAddress(entry);
+   }
+ 
+   static constexpr intptr_t kMaxElements =
+@@ -6985,7 +7022,8 @@ class Code : public Object {
+     const uword entry_offset = HasMonomorphicEntry(code)
+                                    ? Instructions::kPolymorphicEntryOffsetAOT
+                                    : 0;
+-    return EntryPointOf(code) - entry_offset;
++    return Instructions::PayloadAddressFromEntryPoint(
++        EntryPointOf(code) - entry_offset);
+ #else
+     return Instructions::PayloadStart(InstructionsOf(code));
+ #endif
+diff --git a/runtime/vm/os_thread_win.cc b/runtime/vm/os_thread_win.cc
+index e82649e2..ffc47d84 100644
+--- a/runtime/vm/os_thread_win.cc
++++ b/runtime/vm/os_thread_win.cc
+@@ -313,7 +313,7 @@ void ThreadLocalData::Cleanup() {
+ // if it's not already there.  (e.g. if __declspec(thread) is not used).
+ // Force a reference to p_thread_callback_dart to prevent whole program
+ // optimization from discarding the variable.
+-#ifdef _WIN64
++#if defined(_WIN64) || defined(_M_ARM) || defined(__arm__)
+ 
+ #pragma comment(linker, "/INCLUDE:_tls_used")
+ #pragma comment(linker, "/INCLUDE:p_thread_callback_dart")
+diff --git a/runtime/vm/os_win.cc b/runtime/vm/os_win.cc
+index 1c510d2b..cec24a85 100644
+--- a/runtime/vm/os_win.cc
++++ b/runtime/vm/os_win.cc
+@@ -268,7 +268,10 @@ void OS::SleepMicros(int64_t micros) {
+ }
+ 
+ void OS::DebugBreak() {
+-#if defined(_MSC_VER)
++#if defined(__clang__)
++  // Use the compiler target breakpoint instead of x86 inline assembly.
++  __builtin_debugtrap();
++#elif defined(_MSC_VER)
+   // Microsoft Visual C/C++ or drop-in replacement.
+   __debugbreak();
+ #elif defined(__GCC__)
+diff --git a/runtime/vm/stack_frame.cc b/runtime/vm/stack_frame.cc
+index 50d92740..e80bf1e6 100644
+--- a/runtime/vm/stack_frame.cc
++++ b/runtime/vm/stack_frame.cc
+@@ -194,7 +194,7 @@ const char* StackFrame::ToCString() const {
+       code.IsNull()
+           ? "Cannot find code object"
+           : code.QualifiedName(NameFormattingParams(Object::kInternalName));
+-  uword offset = code.IsNull() ? 0 : pc() - code.PayloadStart();
++  uword offset = code.IsNull() ? 0 : Instructions::ReturnAddressForMetadata(pc()) - code.PayloadStart();
+   return zone->PrintToString("  pc 0x%" Pp " fp 0x%" Pp " sp 0x%" Pp
+                              " %s+0x%" Px,
+                              pc(), fp(), sp(), name, offset);
+@@ -284,7 +284,9 @@ void StackFrame::VisitObjectPointers(ObjectPointerVisitor* visitor) {
+     // on the stack map.
+     CompressedStackMaps::Iterator<CompressedStackMaps::RawPayloadHandle> it(
+         maps, global_table);
+-    const uint32_t pc_offset = pc() - code_start;
++    const uint32_t pc_offset =
++        (is_interpreted() ? pc() : Instructions::ReturnAddressForMetadata(pc())) -
++        code_start;
+     if (it.Find(pc_offset)) {
+       if (is_interpreted()) {
+         UNIMPLEMENTED();
+@@ -484,7 +486,10 @@ bool StackFrame::FindExceptionHandler(Thread* thread,
+     HandlerInfoCache* cache = thread->isolate_group()->handler_info_cache();
+     ExceptionHandlerInfo* info = cache->Lookup(pc());
+     if (info != nullptr) {
+-      *handler_pc = start + info->handler_pc_offset;
++      *handler_pc = is_interpreted()
++                        ? start + info->handler_pc_offset
++                        : Instructions::EntryPointAddress(
++                              start + info->handler_pc_offset);
+       *needs_stacktrace = (info->needs_stacktrace != 0);
+       *has_catch_all = (info->has_catch_all != 0);
+       return true;
+@@ -495,7 +500,7 @@ bool StackFrame::FindExceptionHandler(Thread* thread,
+       if (is_interpreted()) {
+         try_index = bytecode.GetTryIndexAtPc(pc());
+       } else {
+-        uword pc_offset = pc() - code.PayloadStart();
++        uword pc_offset = Instructions::ReturnAddressForMetadata(pc()) - code.PayloadStart();
+         PcDescriptors::Iterator iter(descriptors,
+                                      UntaggedPcDescriptors::kAnyKind);
+         while (iter.MoveNext()) {
+@@ -518,7 +523,10 @@ bool StackFrame::FindExceptionHandler(Thread* thread,
+     }
+     ExceptionHandlerInfo handler_info;
+     handlers.GetHandlerInfo(try_index, &handler_info);
+-    *handler_pc = start + handler_info.handler_pc_offset;
++    *handler_pc = is_interpreted()
++                      ? start + handler_info.handler_pc_offset
++                      : Instructions::EntryPointAddress(
++                            start + handler_info.handler_pc_offset);
+     *needs_stacktrace = (handler_info.needs_stacktrace != 0);
+     *has_catch_all = (handler_info.has_catch_all != 0);
+     cache->Insert(pc(), handler_info);
+@@ -538,7 +546,7 @@ TokenPosition StackFrame::GetTokenPos() const {
+   if (code.IsNull()) {
+     return TokenPosition::kNoSource;  // Stub frames do not have token_pos.
+   }
+-  uword pc_offset = pc() - code.PayloadStart();
++  uword pc_offset = Instructions::ReturnAddressForMetadata(pc()) - code.PayloadStart();
+   const PcDescriptors& descriptors =
+       PcDescriptors::Handle(code.pc_descriptors());
+   ASSERT(!descriptors.IsNull());
+diff --git a/runtime/vm/virtual_memory_win.cc b/runtime/vm/virtual_memory_win.cc
+index 043a157d..5c1de784 100644
+--- a/runtime/vm/virtual_memory_win.cc
++++ b/runtime/vm/virtual_memory_win.cc
+@@ -14,6 +14,27 @@
+ 
+ namespace dart {
+ 
++static void* AllocateVirtualPages(void* address, SIZE_T size, DWORD allocation,
++                                 DWORD protection) {
++  void* pages;
++#if defined(FLUTTER_WINDOWS_PHONE)
++  pages = VirtualAllocFromApp(address, size, allocation, protection);
++#else
++  pages = VirtualAlloc(address, size, allocation, protection);
++#endif
++
++  return pages;
++}
++
++static BOOL ProtectVirtualPages(void* address, SIZE_T size, DWORD protection,
++                                DWORD* old_protection) {
++#if defined(FLUTTER_WINDOWS_PHONE)
++  return VirtualProtectFromApp(address, size, protection, old_protection);
++#else
++  return VirtualProtect(address, size, protection, old_protection);
++#endif
++}
++
+ DECLARE_FLAG(bool, write_protect_code);
+ 
+ uword VirtualMemory::page_size_ = 0;
+@@ -33,14 +54,14 @@ static void* AllocateAlignedImpl(intptr_t size,
+                                  intptr_t reserved_size,
+                                  int prot,
+                                  void** out_reserved_address) {
+-  void* address = VirtualAlloc(nullptr, reserved_size, MEM_RESERVE, prot);
++  void* address = AllocateVirtualPages(nullptr, reserved_size, MEM_RESERVE, prot);
+   if (address == nullptr) {
+     return nullptr;
+   }
+ 
+   void* aligned_address = reinterpret_cast<void*>(
+       Utils::RoundUp(reinterpret_cast<uword>(address), alignment));
+-  if (VirtualAlloc(aligned_address, size, MEM_COMMIT, prot) !=
++  if (AllocateVirtualPages(aligned_address, size, MEM_COMMIT, prot) !=
+       aligned_address) {
+     VirtualFree(address, reserved_size, MEM_RELEASE);
+     return nullptr;
+@@ -140,7 +161,7 @@ VirtualMemory* VirtualMemory::Reserve(intptr_t size, intptr_t alignment) {
+   ASSERT(Utils::IsAligned(alignment, PageSize()));
+   intptr_t reserved_size = size + alignment - PageSize();
+   void* reserved_address =
+-      VirtualAlloc(nullptr, reserved_size, MEM_RESERVE, PAGE_NOACCESS);
++      AllocateVirtualPages(nullptr, reserved_size, MEM_RESERVE, PAGE_NOACCESS);
+   if (reserved_address == nullptr) {
+     return nullptr;
+   }
+@@ -155,7 +176,7 @@ VirtualMemory* VirtualMemory::Reserve(intptr_t size, intptr_t alignment) {
+ void VirtualMemory::Commit(void* address, intptr_t size) {
+   ASSERT(Utils::IsAligned(address, PageSize()));
+   ASSERT(Utils::IsAligned(size, PageSize()));
+-  void* result = VirtualAlloc(address, size, MEM_COMMIT, PAGE_READWRITE);
++  void* result = AllocateVirtualPages(address, size, MEM_COMMIT, PAGE_READWRITE);
+   if (result == nullptr) {
+     int error = GetLastError();
+     FATAL("Failed to commit: %d\n", error);
+@@ -235,7 +256,7 @@ void VirtualMemory::Protect(void* address, intptr_t size, Protection mode) {
+       break;
+   }
+   DWORD old_prot = 0;
+-  if (VirtualProtect(reinterpret_cast<void*>(page_address),
++  if (ProtectVirtualPages(reinterpret_cast<void*>(page_address),
+                      end_address - page_address, prot, &old_prot) == 0) {
+     FATAL("VirtualProtect failed %d\n", GetLastError());
+   }
+diff --git a/sdk/BUILD.gn b/sdk/BUILD.gn
+index 67d8ba5a..76c76089 100644
+--- a/sdk/BUILD.gn
++++ b/sdk/BUILD.gn
+@@ -18,6 +18,12 @@ import("../build/executable_suffix.gni")
+ import("../sdk_args.gni")
+ import("../utils/application_snapshot.gni")
+ 
++# SDK copies use the current target's suffix; snapshot actions use the host's.
++_sdk_executable_suffix = executable_suffix
++if (is_win) {
++  _sdk_executable_suffix = ".exe"
++}
++
+ declare_args() {
+   # Build a SDK with less stuff. It excludes dart2js, ddc, and web libraries.
+   dart_platform_sdk = true
+@@ -332,7 +338,7 @@ if (target_os != current_os && target_os == "fuchsia") {
+     visibility = [ ":create_common_sdk" ]
+     deps = [ "../runtime/bin:dartvm" ]
+     dart_out = get_label_info("../runtime/bin:dartvm", "root_out_dir")
+-    sources = [ "$dart_out/${dartvm_stripped_binary}${executable_suffix}" ]
++    sources = [ "$dart_out/${dartvm_stripped_binary}${_sdk_executable_suffix}" ]
+     if (is_win && dart_lib_export_symbols) {
+       sources += [ "$dart_out/dartvm.lib" ]
+     }
+@@ -348,16 +354,16 @@ if (dart_target_arch != "ia32" && dart_target_arch != "x86") {
+     visibility = [ ":create_common_sdk" ]
+     deps = [ "../runtime/bin:dart" ]
+     src_dir = get_label_info("../runtime/bin:dart", "root_out_dir")
+-    sources = [ "$src_dir/${dart_stripped_binary}${executable_suffix}" ]
+-    outputs = [ "$root_out_dir/$dart_sdk_output/bin/dart${executable_suffix}" ]
++    sources = [ "$src_dir/${dart_stripped_binary}${_sdk_executable_suffix}" ]
++    outputs = [ "$root_out_dir/$dart_sdk_output/bin/dart${_sdk_executable_suffix}" ]
+   }
+ } else {
+   copy("copy_dart") {
+     visibility = [ ":create_common_sdk" ]
+     deps = [ "../runtime/bin:dartvm" ]
+     src_dir = get_label_info("../runtime/bin:dartvm", "root_out_dir")
+-    sources = [ "$src_dir/${dartvm_stripped_binary}${executable_suffix}" ]
+-    outputs = [ "$root_out_dir/$dart_sdk_output/bin/dart${executable_suffix}" ]
++    sources = [ "$src_dir/${dartvm_stripped_binary}${_sdk_executable_suffix}" ]
++    outputs = [ "$root_out_dir/$dart_sdk_output/bin/dart${_sdk_executable_suffix}" ]
+   }
+ }
+ 
+@@ -367,9 +373,9 @@ copy("copy_dart_aotruntime") {
+   src_dir =
+       get_label_info("../runtime/bin:dartaotruntime_product", "root_out_dir")
+   sources =
+-      [ "$src_dir/${dart_aotruntime_stripped_binary}${executable_suffix}" ]
++      [ "$src_dir/${dart_aotruntime_stripped_binary}${_sdk_executable_suffix}" ]
+   outputs = [
+-    "$root_out_dir/$dart_sdk_output/bin/dartaotruntime${executable_suffix}",
++    "$root_out_dir/$dart_sdk_output/bin/dartaotruntime${_sdk_executable_suffix}",
+   ]
+ }
+ 
+@@ -385,9 +391,9 @@ copy("copy_gen_snapshot_exe") {
+   deps = [ "../runtime/bin:gen_snapshot_product" ]
+   src_dir =
+       get_label_info("../runtime/bin:gen_snapshot_product", "root_out_dir")
+-  sources = [ "$src_dir/${gen_snapshot_stripped_binary}${executable_suffix}" ]
++  sources = [ "$src_dir/${gen_snapshot_stripped_binary}${_sdk_executable_suffix}" ]
+   outputs = [
+-    "$root_out_dir/$dart_sdk_output/bin/utils/gen_snapshot${executable_suffix}",
++    "$root_out_dir/$dart_sdk_output/bin/utils/gen_snapshot${_sdk_executable_suffix}",
+   ]
+ }
+ 
+@@ -395,7 +401,7 @@ if (_has_dot_sym) {
+   copy("copy_gen_snapshot_sym") {
+     deps = [ "../runtime/bin:gen_snapshot_product" ]
+     sources = [ "$root_out_dir/gen_snapshot_product.sym" ]
+-    outputs = [ "$root_out_dir/$dart_sdk_output/bin/utils/gen_snapshot${executable_suffix}.sym" ]
++    outputs = [ "$root_out_dir/$dart_sdk_output/bin/utils/gen_snapshot${_sdk_executable_suffix}.sym" ]
+   }
+ }
+ 
+@@ -601,7 +607,7 @@ copy("copy_wasm_opt") {
+     ":copy_libraries",
+     "../third_party/binaryen:wasm-opt",
+   ]
+-  sources = [ "$root_out_dir/${wasm_opt_stripped_binary}${executable_suffix}" ]
++  sources = [ "$root_out_dir/${wasm_opt_stripped_binary}${_sdk_executable_suffix}" ]
+   outputs = [ "$root_out_dir/$dart_sdk_output/bin/utils/{{source_file_part}}" ]
+ }
+ 
+diff --git a/sdk/lib/ffi/abi.dart b/sdk/lib/ffi/abi.dart
+index ce2a797a..eafcc693 100644
+--- a/sdk/lib/ffi/abi.dart
++++ b/sdk/lib/ffi/abi.dart
+@@ -85,6 +85,9 @@ class Abi {
+   /// The application binary interface for Windows on the X64 architecture.
+   static const windowsX64 = _windowsX64;
+ 
++  /// The application binary interface for Windows on 32-bit Arm.
++  static const windowsArm = _windowsArm;
++
+   /// The ABIs that the DartVM can run on.
+   ///
+   /// Does not contain a `macosIA32`. We have stopped supporting 32-bit MacOS.
+@@ -111,6 +114,8 @@ class Abi {
+     windowsArm64,
+     windowsIA32,
+     windowsX64,
++    // Keep existing indexes stable; Windows ARM32 is appended.
++    windowsArm,
+   ];
+ 
+   /// The ABI the Dart VM is currently running on.
+@@ -155,6 +160,7 @@ class Abi {
+   static const _windowsArm64 = Abi._(_Architecture.arm64, _OS.windows);
+   static const _windowsIA32 = Abi._(_Architecture.ia32, _OS.windows);
+   static const _windowsX64 = Abi._(_Architecture.x64, _OS.windows);
++  static const _windowsArm = Abi._(_Architecture.arm, _OS.windows);
+ }
+ 
+ /// The hardware architectures the Dart VM runs on.
+diff --git a/sdk/lib/ffi/c_type.dart b/sdk/lib/ffi/c_type.dart
+index ec22495c..a0218ab5 100644
+--- a/sdk/lib/ffi/c_type.dart
++++ b/sdk/lib/ffi/c_type.dart
+@@ -44,6 +44,7 @@ part of "dart:ffi";
+   Abi.macosX64: Int8(),
+   Abi.windowsArm64: Int8(),
+   Abi.windowsIA32: Int8(),
++  Abi.windowsArm: Int8(),
+   Abi.windowsX64: Int8(),
+ })
+ final class Char extends AbiSpecificInteger {
+@@ -83,6 +84,7 @@ final class Char extends AbiSpecificInteger {
+   Abi.macosX64: Int8(),
+   Abi.windowsArm64: Int8(),
+   Abi.windowsIA32: Int8(),
++  Abi.windowsArm: Int8(),
+   Abi.windowsX64: Int8(),
+ })
+ final class SignedChar extends AbiSpecificInteger {
+@@ -122,6 +124,7 @@ final class SignedChar extends AbiSpecificInteger {
+   Abi.macosX64: Uint8(),
+   Abi.windowsArm64: Uint8(),
+   Abi.windowsIA32: Uint8(),
++  Abi.windowsArm: Uint8(),
+   Abi.windowsX64: Uint8(),
+ })
+ final class UnsignedChar extends AbiSpecificInteger {
+@@ -161,6 +164,7 @@ final class UnsignedChar extends AbiSpecificInteger {
+   Abi.macosX64: Int16(),
+   Abi.windowsArm64: Int16(),
+   Abi.windowsIA32: Int16(),
++  Abi.windowsArm: Int16(),
+   Abi.windowsX64: Int16(),
+ })
+ final class Short extends AbiSpecificInteger {
+@@ -200,6 +204,7 @@ final class Short extends AbiSpecificInteger {
+   Abi.macosX64: Uint16(),
+   Abi.windowsArm64: Uint16(),
+   Abi.windowsIA32: Uint16(),
++  Abi.windowsArm: Uint16(),
+   Abi.windowsX64: Uint16(),
+ })
+ final class UnsignedShort extends AbiSpecificInteger {
+@@ -239,6 +244,7 @@ final class UnsignedShort extends AbiSpecificInteger {
+   Abi.macosX64: Int32(),
+   Abi.windowsArm64: Int32(),
+   Abi.windowsIA32: Int32(),
++  Abi.windowsArm: Int32(),
+   Abi.windowsX64: Int32(),
+ })
+ final class Int extends AbiSpecificInteger {
+@@ -278,6 +284,7 @@ final class Int extends AbiSpecificInteger {
+   Abi.macosX64: Uint32(),
+   Abi.windowsArm64: Uint32(),
+   Abi.windowsIA32: Uint32(),
++  Abi.windowsArm: Uint32(),
+   Abi.windowsX64: Uint32(),
+ })
+ final class UnsignedInt extends AbiSpecificInteger {
+@@ -318,6 +325,7 @@ final class UnsignedInt extends AbiSpecificInteger {
+   Abi.macosX64: Int64(),
+   Abi.windowsArm64: Int32(),
+   Abi.windowsIA32: Int32(),
++  Abi.windowsArm: Int32(),
+   Abi.windowsX64: Int32(),
+ })
+ final class Long extends AbiSpecificInteger {
+@@ -358,6 +366,7 @@ final class Long extends AbiSpecificInteger {
+   Abi.macosX64: Uint64(),
+   Abi.windowsArm64: Uint32(),
+   Abi.windowsIA32: Uint32(),
++  Abi.windowsArm: Uint32(),
+   Abi.windowsX64: Uint32(),
+ })
+ final class UnsignedLong extends AbiSpecificInteger {
+@@ -397,6 +406,7 @@ final class UnsignedLong extends AbiSpecificInteger {
+   Abi.macosX64: Int64(),
+   Abi.windowsArm64: Int64(),
+   Abi.windowsIA32: Int64(),
++  Abi.windowsArm: Int64(),
+   Abi.windowsX64: Int64(),
+ })
+ final class LongLong extends AbiSpecificInteger {
+@@ -436,6 +446,7 @@ final class LongLong extends AbiSpecificInteger {
+   Abi.macosX64: Uint64(),
+   Abi.windowsArm64: Uint64(),
+   Abi.windowsIA32: Uint64(),
++  Abi.windowsArm: Uint64(),
+   Abi.windowsX64: Uint64(),
+ })
+ final class UnsignedLongLong extends AbiSpecificInteger {
+@@ -470,6 +481,7 @@ final class UnsignedLongLong extends AbiSpecificInteger {
+   Abi.macosX64: Int64(),
+   Abi.windowsArm64: Int64(),
+   Abi.windowsIA32: Int32(),
++  Abi.windowsArm: Int32(),
+   Abi.windowsX64: Int64(),
+ })
+ final class IntPtr extends AbiSpecificInteger {
+@@ -505,6 +517,7 @@ final class IntPtr extends AbiSpecificInteger {
+   Abi.macosX64: Uint64(),
+   Abi.windowsArm64: Uint64(),
+   Abi.windowsIA32: Uint32(),
++  Abi.windowsArm: Uint32(),
+   Abi.windowsX64: Uint64(),
+ })
+ final class UintPtr extends AbiSpecificInteger {
+@@ -540,6 +553,7 @@ final class UintPtr extends AbiSpecificInteger {
+   Abi.macosX64: Uint64(),
+   Abi.windowsArm64: Uint64(),
+   Abi.windowsIA32: Uint32(),
++  Abi.windowsArm: Uint32(),
+   Abi.windowsX64: Uint64(),
+ })
+ final class Size extends AbiSpecificInteger {
+@@ -578,6 +592,7 @@ final class Size extends AbiSpecificInteger {
+   Abi.macosX64: Int32(),
+   Abi.windowsArm64: Uint16(),
+   Abi.windowsIA32: Uint16(),
++  Abi.windowsArm: Uint16(),
+   Abi.windowsX64: Uint16(),
+ })
+ final class WChar extends AbiSpecificInteger {

@@ -13,7 +13,6 @@
 #include "flutter/shell/platform/common/accessibility_bridge.h"
 #include "flutter/shell/platform/windows/keyboard_key_channel_handler.h"
 #include "flutter/shell/platform/windows/text_input_plugin.h"
-#include "flutter/third_party/accessibility/ax/platform/ax_platform_node_win.h"
 
 namespace flutter {
 
@@ -703,9 +702,10 @@ bool FlutterWindowsView::ClearSoftwareBitmap() {
 
 bool FlutterWindowsView::PresentSoftwareBitmap(const void* allocation,
                                                size_t row_bytes,
-                                               size_t height) {
+                                               size_t height,
+                                               bool top_down) {
   return binding_handler_->OnBitmapSurfaceUpdated(allocation, row_bytes,
-                                                  height);
+                                                  height, top_down);
 }
 
 FlutterViewId FlutterWindowsView::view_id() const {
@@ -786,6 +786,9 @@ FlutterWindowsEngine* FlutterWindowsView::GetEngine() const {
 }
 
 void FlutterWindowsView::AnnounceAlert(const std::wstring& text) {
+#if defined(_M_ARM)
+  return;
+#else
   auto alert_delegate = binding_handler_->GetAlertDelegate();
   if (!alert_delegate) {
     return;
@@ -793,13 +796,16 @@ void FlutterWindowsView::AnnounceAlert(const std::wstring& text) {
   alert_delegate->SetText(fml::WideStringToUtf16(text));
   ui::AXPlatformNodeWin* alert_node = binding_handler_->GetAlert();
   NotifyWinEventWrapper(alert_node, ax::mojom::Event::kAlert);
+#endif
 }
 
 void FlutterWindowsView::NotifyWinEventWrapper(ui::AXPlatformNodeWin* node,
                                                ax::mojom::Event event) {
+#if !defined(_M_ARM)
   if (node) {
     node->NotifyAccessibilityEvent(event);
   }
+#endif
 }
 
 ui::AXFragmentRootDelegateWin* FlutterWindowsView::GetAxFragmentRootDelegate() {
@@ -812,7 +818,11 @@ ui::AXPlatformNodeWin* FlutterWindowsView::AlertNode() const {
 
 std::shared_ptr<AccessibilityBridgeWindows>
 FlutterWindowsView::CreateAccessibilityBridge() {
+#if defined(_M_ARM)
+  return nullptr;
+#else
   return std::make_shared<AccessibilityBridgeWindows>(this);
+#endif
 }
 
 void FlutterWindowsView::UpdateSemanticsEnabled(bool enabled) {

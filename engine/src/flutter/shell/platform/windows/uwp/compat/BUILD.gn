@@ -1,0 +1,17 @@
+# Phone SDK adapters for legacy Windows ABI calls backed by WinRT.
+assert(flutter_windows_phone)
+
+shared_library("flutter_winrt_compat") {
+  sources = [
+    "directory_listing.h",
+    "downloads_folder.h",
+    "storage_access.h",
+    "storage_handle.h",
+    "windows_api.cc",
+  ]
+  inputs = [ "windows_api.def" ]
+  if (!defined(ldflags)) {
+    ldflags = []
+  }
+  ldflags += [ "/DEF:" + rebase_path("windows_api.def", root_build_dir) ]
+}

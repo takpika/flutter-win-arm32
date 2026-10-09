@@ -1,0 +1,63 @@
+#pragma once
+#include_next <windows.h>
+
+#if defined(__MINGW32__) && defined(FLUTTER_WINDOWS_PHONE)
+// Native Windows import libraries provide these entry points, but MinGW's older
+// app-family header guards omit their declarations. Preserve the native ABI
+// and OS error behavior; do not replace process operations with no-op handlers.
+#ifdef __cplusplus
+extern "C" {
+#endif
+WINBASEAPI HMODULE WINAPI LoadLibraryExW(LPCWSTR, HANDLE, DWORD);
+WINBASEAPI HMODULE WINAPI GetModuleHandleA(LPCSTR);
+WINBASEAPI HMODULE WINAPI GetModuleHandleW(LPCWSTR);
+WINBASEAPI WINBOOL WINAPI GetModuleHandleExA(DWORD, LPCSTR, HMODULE*);
+WINBASEAPI WINBOOL WINAPI GetModuleHandleExW(DWORD, LPCWSTR, HMODULE*);
+WINBASEAPI WINBOOL WINAPI SetHandleInformation(HANDLE, DWORD, DWORD);
+WINBASEAPI HANDLE WINAPI CreateFileA(LPCSTR, DWORD, DWORD,
+                                    LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
+WINBASEAPI HANDLE WINAPI CreateFileW(LPCWSTR, DWORD, DWORD,
+                                    LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
+WINBASEAPI WINBOOL WINAPI RegisterWaitForSingleObject(
+    PHANDLE, HANDLE, WAITORTIMERCALLBACK, PVOID, ULONG, ULONG);
+WINBASEAPI WINBOOL WINAPI UnregisterWait(HANDLE);
+WINBASEAPI WINBOOL WINAPI InitializeProcThreadAttributeList(
+    LPPROC_THREAD_ATTRIBUTE_LIST, DWORD, DWORD, PSIZE_T);
+WINBASEAPI VOID WINAPI DeleteProcThreadAttributeList(LPPROC_THREAD_ATTRIBUTE_LIST);
+WINBASEAPI WINBOOL WINAPI UpdateProcThreadAttribute(
+    LPPROC_THREAD_ATTRIBUTE_LIST, DWORD, DWORD_PTR, PVOID, SIZE_T, PVOID, PSIZE_T);
+WINBASEAPI WINBOOL WINAPI AssignProcessToJobObject(HANDLE, HANDLE);
+WINBASEAPI HANDLE WINAPI CreateJobObjectA(LPSECURITY_ATTRIBUTES, LPCSTR);
+WINBASEAPI HANDLE WINAPI CreateJobObjectW(LPSECURITY_ATTRIBUTES, LPCWSTR);
+WINBASEAPI WINBOOL WINAPI QueryInformationJobObject(
+    HANDLE, JOBOBJECTINFOCLASS, LPVOID, DWORD, LPDWORD);
+WINBASEAPI WINBOOL WINAPI SetInformationJobObject(
+    HANDLE, JOBOBJECTINFOCLASS, LPVOID, DWORD);
+#ifdef __cplusplus
+}
+#endif
+#ifndef LOAD_LIBRARY_SEARCH_SYSTEM32
+#define LOAD_LIBRARY_SEARCH_SYSTEM32 0x00000800
+#endif
+#ifndef STARTF_USESTDHANDLES
+#define STARTF_USESTDHANDLES 0x00000100
+#endif
+#if !WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP)
+typedef struct _STARTUPINFOEXW {
+  STARTUPINFOW StartupInfo;
+  LPPROC_THREAD_ATTRIBUTE_LIST lpAttributeList;
+} STARTUPINFOEXW, *LPSTARTUPINFOEXW;
+#endif
+#ifndef PROC_THREAD_ATTRIBUTE_HANDLE_LIST
+#define PROC_THREAD_ATTRIBUTE_HANDLE_LIST 0x00020002
+#endif
+#ifndef CreateJobObject
+#define CreateJobObject __MINGW_NAME_AW(CreateJobObject)
+#endif
+#ifndef GetModuleHandle
+#define GetModuleHandle __MINGW_NAME_AW(GetModuleHandle)
+#endif
+#ifndef GetModuleHandleEx
+#define GetModuleHandleEx __MINGW_NAME_AW(GetModuleHandleEx)
+#endif
+#endif

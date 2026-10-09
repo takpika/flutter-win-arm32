@@ -1,0 +1,128 @@
+name: Publish validated Windows ARM32 SDK
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: Successful Windows ARM32 source-engine workflow run
+        required: true
+        type: string
+      release_tag:
+        description: New release tag (for example v3.38.10-windows-arm32.1)
+        required: true
+        type: string
+      validation_record:
+        description: JSON record from physical validation of this exact SDK
+        required: true
+        type: string
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: windows-arm32-release-${{ inputs.release_tag }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BUILD_RUN_ID: ${{ inputs.build_run_id }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      VALIDATION_RECORD: ${{ inputs.validation_record }}
+    steps:
+      - name: Prepare Ubuntu amd64 container dependencies
+        run: |
+          test "$(uname -m)" = x86_64
+          mkdir -p "$GITHUB_WORKSPACE/_work/tmp"
+          export TMPDIR="$GITHUB_WORKSPACE/_work/tmp"
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential clang cmake ninja-build \
+            git curl ca-certificates python3 python3-pip python3-venv pkg-config \
+            zip unzip xz-utils zstd patchelf libxml2-dev libzstd-dev zlib1g-dev \
+            libssl-dev liblzma-dev libcurl4-openssl-dev libncurses-dev gh
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Validate build origin and physical validation input
+        run: |
+          mkdir -p _work/tmp
+          echo "TMPDIR=$GITHUB_WORKSPACE/_work/tmp" >> "$GITHUB_ENV"
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+          run_id = os.environ['BUILD_RUN_ID']
+          tag = os.environ['RELEASE_TAG']
+          if not run_id.isdecimal() or not re.fullmatch(r'v3\.38\.10-windows-arm32\.[1-9][0-9]*', tag):
+              raise SystemExit('Invalid source build run or release tag')
+          run = json.loads(subprocess.check_output([
+              'gh', 'api', 'repos/' + os.environ['GH_REPO'] + '/actions/runs/' + run_id], text=True))
+          if (run['status'] != 'completed' or run['conclusion'] != 'success' or
+                  run['head_branch'] != 'windows-arm32-3.38.10' or
+                  run['head_repository']['full_name'] != os.environ['GH_REPO'] or
+                  run['path'] != '.github/workflows/windows-arm32-engine.yml'):
+              raise SystemExit('Select a successful build from the port workflow and branch')
+          validation = json.loads(os.environ['VALIDATION_RECORD'])
+          Path('_work/physical-validation.json').write_text(json.dumps(validation, indent=2) + '\n')
+          Path('_work/build-run.json').write_text(json.dumps(run, indent=2) + '\n')
+          PY
+      - name: Download this build's SDK
+        run: |
+          gh run download "$BUILD_RUN_ID" --name flutter-windows-arm32-linux-x64 --dir _work/download
+      - name: Match SDK bytes to both physical device validations
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import subprocess
+          from pathlib import Path
+          archive = Path('_work/download/flutter-windows-arm32-linux-x64.tar.gz')
+          expected = archive.with_name(archive.name + '.sha256').read_text().split()[0]
+          if hashlib.sha256(archive.read_bytes()).hexdigest() != expected:
+              raise SystemExit('SDK archive checksum failed')
+          run = json.loads(Path('_work/build-run.json').read_text())
+          subprocess.run(['python3', 'dev/windows_arm32/verify_release.py',
+              '--archive', str(archive), '--validation-record', '_work/physical-validation.json',
+              '--build-run-id', str(run['id']), '--source-revision', run['head_sha'],
+              '--output', '_work/release-verification.json'], check=True)
+          PY
+      - name: Publish the verified SDK and evidence
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+          proof = json.loads(Path('_work/release-verification.json').read_text())
+          if proof['releaseReady'] is not True:
+              raise SystemExit('Release verification did not pass')
+          refs = json.loads(subprocess.check_output(['gh', 'api',
+              'repos/' + os.environ['GH_REPO'] + '/git/matching-refs/tags/' + os.environ['RELEASE_TAG']],
+              text=True))
+          if any(ref['ref'] == 'refs/tags/' + os.environ['RELEASE_TAG'] for ref in refs):
+              raise SystemExit('Select a new release tag; existing tags are preserved')
+          notes = Path('_work/release-notes.md')
+          notes.write_text('Flutter 3.38.10 Windows ARM32 SDK for Linux x64 (Ubuntu 24.04).\n\n'
+              'Builds Windows RT / Win32 and Windows 10 Mobile / UWP applications from the same engine source.\n\n'
+              'The attached validation records match this SDK archive and its runtime DLLs. '
+              'Both device families passed hardware GPU and application checks.\n')
+          subprocess.run(['gh', 'release', 'create', os.environ['RELEASE_TAG'],
+              '--target', proof['sourceRevision'], '--title', os.environ['RELEASE_TAG'],
+              '--notes-file', str(notes),
+              '_work/download/flutter-windows-arm32-linux-x64.tar.gz',
+              '_work/download/flutter-windows-arm32-linux-x64.tar.gz.sha256',
+              '_work/physical-validation.json', '_work/release-verification.json'], check=True)
+          PY

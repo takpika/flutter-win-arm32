@@ -12,7 +12,9 @@
 #define IMPELLER_GL_CLAMP_TO_BORDER 0x812D
 #define IMPELLER_GL_TEXTURE_BORDER_COLOR 0x1004
 
+#ifndef GL_GLEXT_PROTOTYPES
 #define GL_GLEXT_PROTOTYPES
+#endif
 #include "GLES2/gl2ext.h"
 // IWYU pragma: end_exports
 

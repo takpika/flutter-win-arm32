@@ -1,0 +1,17 @@
+--- a/clang/lib/Sema/SemaOverload.cpp
++++ b/clang/lib/Sema/SemaOverload.cpp
+@@ -1249,6 +1249,14 @@
+       !New->getFriendObjectKind();
+ 
+     if (FunctionDecl *OldF = OldD->getAsFunction()) {
++      // MSVC keeps inherited constructor templates with different template
++      // parameter lists available. Ordinary member using-declarations still
++      // use the standard hiding rules, as do non-MSVC language modes.
++      if (getLangOpts().MSVCCompat && OldIsUsingDecl && !NewIsUsingDecl &&
++          isa<CXXConstructorDecl>(New) && isa<CXXConstructorDecl>(OldF) &&
++          cast<CXXConstructorDecl>(New)->isExplicit() &&
++          !cast<CXXConstructorDecl>(OldF)->isExplicit())
++        UseMemberUsingDeclRules = false;
+       if (!IsOverload(New, OldF, UseMemberUsingDeclRules)) {
+         if (UseMemberUsingDeclRules && OldIsUsingDecl) {
+           HideUsingShadowDecl(S, cast<UsingShadowDecl>(*I));

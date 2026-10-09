@@ -1,0 +1,26 @@
+{
+  "upstreamRevision": "ea7cdbc6b986bbefcbac92fa429782e59518510f",
+  "files": [
+    {
+      "path": "src/ports/SkFontMgr_win_dw.cpp",
+      "originalSha256": "179ce3a03b9b16804d32f86f0e2281982478f9fe53fe0d3a7d2b54238467793b",
+      "patchedSha256": "2c5b6bc89e693210faeb44e9d57f3f0ed741527c468b8e667649fedaee4c040b"
+    },
+    {
+      "path": "src/ports/SkOSFile_win.cpp",
+      "originalSha256": "97f13868e4c1e25a74307804e011604cde68d93d1aa4081d2b502d6f2e64f7a5",
+      "patchedSha256": "b7b3a2d2edab3ad5eae7e8a12443be9dfecc63625e43c62da1b83558336b8213"
+    },
+    {
+      "path": "src/utils/win/SkDWrite.cpp",
+      "originalSha256": "fa286bdffb5393ff387c2a98c1289f88dd273fa2d9bc48d2d83b0c7390a04ccf",
+      "patchedSha256": "749e694f588a545226d60477fd3022bb9296e5b8d79adfac18fd22470491c2e3"
+    },
+    {
+      "path": "src/gpu/ganesh/gl/win/GrGLMakeWinInterface.cpp",
+      "originalSha256": "884c8d62f452062bc36471b768a74e55130e830bb97af0e6ba2ed208a04acb69",
+      "patchedSha256": "b4f90f8029f75e61824fb06f3bbce6f1c964692de6f2ab52e4125043329b830a"
+    }
+  ],
+  "scope": "Phone OS API selection and native WGL runtime capability discovery; compiler header compatibility stays in the toolchain adapter"
+}

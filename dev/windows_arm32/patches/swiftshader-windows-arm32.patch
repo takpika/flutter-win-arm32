@@ -1,0 +1,60 @@
+diff --git a/src/System/Timer.cpp b/src/System/Timer.cpp
+index 79e48ca..c13a415 100644
+--- a/src/System/Timer.cpp
++++ b/src/System/Timer.cpp
+@@ -61,6 +61,8 @@ int64_t Timer::ticks()
+ #if defined(_WIN32)
+ #	if defined(_M_ARM64)
+ 	return _ReadStatusReg(ARM64_PMCCNTR_EL0);
++#	elif defined(_M_ARM) || defined(__arm__)
++	return counter();  // Windows ARM32 platform performance-counter ticks.
+ #	else
+ 	return __rdtsc();
+ #	endif
+diff --git a/third_party/llvm-subzero/lib/Support/Windows/Signals.inc b/third_party/llvm-subzero/lib/Support/Windows/Signals.inc
+index 38cc566..3d6c1d8 100644
+--- a/third_party/llvm-subzero/lib/Support/Windows/Signals.inc
++++ b/third_party/llvm-subzero/lib/Support/Windows/Signals.inc
+@@ -212,6 +212,8 @@ static StringRef Argv0;
+ enum {
+ #if defined(_M_X64)
+   NativeMachineType = IMAGE_FILE_MACHINE_AMD64
++#elif defined(_M_ARM) || defined(__arm__)
++  NativeMachineType = IMAGE_FILE_MACHINE_ARMNT
+ #else
+   NativeMachineType = IMAGE_FILE_MACHINE_I386
+ #endif
+@@ -321,7 +323,7 @@ static void PrintStackTraceForThread(llvm::raw_ostream &OS, HANDLE hProcess,
+     DWORD64 PC = StackFrame.AddrPC.Offset;
+ #if defined(_M_X64)
+     OS << format("0x%016llX", PC);
+-#elif defined(_M_IX86)
++#elif defined(_M_IX86) || defined(_M_ARM) || defined(__arm__)
+     OS << format("0x%08lX", static_cast<DWORD>(PC));
+ #endif
+ 
+@@ -528,6 +530,10 @@ void llvm::sys::PrintStackTrace(raw_ostream &OS) {
+   StackFrame.AddrPC.Offset = Context.Rip;
+   StackFrame.AddrStack.Offset = Context.Rsp;
+   StackFrame.AddrFrame.Offset = Context.Rbp;
++#elif defined(_M_ARM) || defined(__arm__)
++  StackFrame.AddrPC.Offset = Context.Pc;
++  StackFrame.AddrStack.Offset = Context.Sp;
++  StackFrame.AddrFrame.Offset = Context.R11;
+ #else
+   StackFrame.AddrPC.Offset = Context.Eip;
+   StackFrame.AddrStack.Offset = Context.Esp;
+@@ -806,6 +812,13 @@ static LONG WINAPI LLVMUnhandledExceptionFilter(LPEXCEPTION_POINTERS ep) {
+   StackFrame.AddrStack.Mode = AddrModeFlat;
+   StackFrame.AddrFrame.Offset = ep->ContextRecord->Ebp;
+   StackFrame.AddrFrame.Mode = AddrModeFlat;
++#elif defined(_M_ARM) || defined(__arm__)
++  StackFrame.AddrPC.Offset = ep->ContextRecord->Pc;
++  StackFrame.AddrPC.Mode = AddrModeFlat;
++  StackFrame.AddrStack.Offset = ep->ContextRecord->Sp;
++  StackFrame.AddrStack.Mode = AddrModeFlat;
++  StackFrame.AddrFrame.Offset = ep->ContextRecord->R11;
++  StackFrame.AddrFrame.Mode = AddrModeFlat;
+ #endif
+ 
+   HANDLE hProcess = GetCurrentProcess();

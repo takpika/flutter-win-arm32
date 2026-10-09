@@ -13,6 +13,7 @@ import '../features.dart';
 import '../globals.dart' as globals;
 import '../runner/flutter_command.dart' show FlutterCommandResult;
 import '../windows/build_windows.dart';
+import '../windows/build_windows_phone.dart';
 import '../windows/visual_studio.dart';
 import 'build.dart';
 
@@ -25,6 +26,17 @@ class BuildWindowsCommand extends BuildSubCommand {
   }) : _operatingSystemUtils = operatingSystemUtils,
        super(verboseHelp: verboseHelp) {
     addCommonDesktopBuildOptions(verboseHelp: verboseHelp);
+    argParser.addOption(
+      'target-platform',
+      allowed: <String>['windows-x64', 'windows-arm64', 'windows-arm'],
+      help: 'The Windows architecture to build for.',
+    );
+    argParser.addOption(
+      'windows-family',
+      allowed: <String>['desktop', 'phone'],
+      defaultsTo: 'desktop',
+      help: 'The Windows application family to build for.',
+    );
     argParser.addFlag(
       'config-only',
       help: 'Update the project configuration without performing a build.',
@@ -37,7 +49,9 @@ class BuildWindowsCommand extends BuildSubCommand {
   final name = 'windows';
 
   @override
-  bool get hidden => !featureFlags.isWindowsEnabled || !globals.platform.isWindows;
+  bool get hidden =>
+      (!featureFlags.isWindowsEnabled || !globals.platform.isWindows) &&
+      !windowsArmCrossBuildAvailable;
 
   @override
   Future<Set<DevelopmentArtifact>> get requiredArtifacts async => <DevelopmentArtifact>{
@@ -55,19 +69,42 @@ class BuildWindowsCommand extends BuildSubCommand {
   @override
   Future<FlutterCommandResult> runCommand() async {
     final BuildInfo buildInfo = await getBuildInfo();
-    if (!featureFlags.isWindowsEnabled) {
+    final phone = stringArg('windows-family') == 'phone';
+    final defaultTargetPlatform = phone
+        ? 'windows-arm'
+        : !globals.platform.isWindows && windowsArmCrossBuildAvailable
+        ? 'windows-arm'
+        : (_operatingSystemUtils.hostPlatform == HostPlatform.windows_arm64)
+        ? 'windows-arm64'
+        : 'windows-x64';
+    final TargetPlatform targetPlatform = getTargetPlatformForName(
+      stringArg('target-platform') ?? defaultTargetPlatform,
+    );
+    final bool crossBuild =
+        targetPlatform == TargetPlatform.windows_arm &&
+        !globals.platform.isWindows &&
+        windowsArmCrossBuildAvailable;
+    if (!featureFlags.isWindowsEnabled && !crossBuild) {
       throwToolExit(
         '"build windows" is not currently supported. To enable, run "flutter config --enable-windows-desktop".',
       );
     }
-    if (!globals.platform.isWindows) {
+    if (!globals.platform.isWindows && !crossBuild) {
       throwToolExit('"build windows" only supported on Windows hosts.');
     }
 
-    final defaultTargetPlatform = (_operatingSystemUtils.hostPlatform == HostPlatform.windows_arm64)
-        ? 'windows-arm64'
-        : 'windows-x64';
-    final TargetPlatform targetPlatform = getTargetPlatformForName(defaultTargetPlatform);
+    if (phone) {
+      if (targetPlatform != TargetPlatform.windows_arm) {
+        throwToolExit('The Windows Phone SDK targets windows-arm.');
+      }
+      await buildWindowsPhone(
+        project.windows,
+        buildInfo,
+        target: targetFile,
+        configOnly: configOnly,
+      );
+      return FlutterCommandResult.success();
+    }
 
     await buildWindows(
       project.windows,

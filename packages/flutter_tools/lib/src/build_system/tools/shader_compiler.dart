@@ -113,6 +113,7 @@ class ShaderCompiler {
       case TargetPlatform.linux_x64:
       case TargetPlatform.linux_arm64:
       case TargetPlatform.windows_x64:
+      case TargetPlatform.windows_arm:
       case TargetPlatform.windows_arm64:
         return <String>[
           '--sksl',

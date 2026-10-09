@@ -30,7 +30,11 @@ RunConfiguration RunConfiguration::InferFromSettings(
   asset_manager->PushBack(std::make_unique<DirectoryAssetBundle>(
       fml::OpenDirectory(settings.assets_path.c_str(), false,
                          fml::FilePermission::kRead),
-      true));
+      true
+#if defined(FLUTTER_WINDOWS_PHONE)
+      , settings.assets_path
+#endif
+      ));
 
   return {IsolateConfiguration::InferFromSettings(settings, asset_manager,
                                                   io_worker, launch_type),

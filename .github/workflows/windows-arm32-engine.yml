@@ -1,0 +1,872 @@
+name: Windows ARM32 source engines
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [windows-arm32-3.38.10]
+    paths:
+      - dev/windows_arm32/**
+      - engine/src/**
+      - packages/flutter_tools/**
+      - .github/workflows/windows-arm32-*.yml
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+jobs:
+  compiler:
+    uses: ./.github/workflows/windows-arm32-compiler.yml
+  rust_dependencies:
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    timeout-minutes: 30
+    steps:
+      - name: Prepare Ubuntu amd64 container dependencies
+        run: |
+          test "$(uname -m)" = x86_64
+          mkdir -p "$GITHUB_WORKSPACE/_work/tmp"
+          export TMPDIR="$GITHUB_WORKSPACE/_work/tmp"
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential clang cmake ninja-build \
+            git curl ca-certificates python3 python3-pip python3-venv pkg-config \
+            zip unzip xz-utils zstd patchelf libxml2-dev libzstd-dev zlib1g-dev \
+            libssl-dev liblzma-dev libcurl4-openssl-dev libncurses-dev gh
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Prepare pinned native Rust SDK sources
+        run: |
+          mkdir -p _work/tmp
+          echo "TMPDIR=$GITHUB_WORKSPACE/_work/tmp" >> "$GITHUB_ENV"
+          python3 - <<'PY'
+          import subprocess
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, 'dev/windows_arm32/toolchain')
+          import prepare_rust_dependencies
+          work = Path('_work').resolve()
+          cache = work / 'crate-inputs'
+          cache.mkdir()
+          for name in prepare_rust_dependencies.CRATES:
+              package = name.rsplit('-', 1)[0]
+              url = 'https://static.crates.io/crates/' + package + '/' + name + '.crate'
+              subprocess.run(['curl', '--fail', '--location', '--retry', '3',
+                              url, '--output', str(cache / (name + '.crate'))], check=True)
+          prepare_rust_dependencies.prepare(cache, work / 'rust-dependencies')
+          PY
+      - name: Verify native SDK sources and package with upstream licenses
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import tarfile
+          import tomllib
+          from pathlib import Path
+          work = Path('_work')
+          distribution = work / 'rust-dependencies'
+          report = json.loads((distribution / 'dependency-provenance.json').read_text())
+          expected_files = {'.cargo/sdk-patches.toml', 'dependency-provenance.json'}
+          for name, record in report['crates'].items():
+              for relative, digest in record['files'].items():
+                  path = distribution / name / relative
+                  if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+                      raise SystemExit('Native SDK dependency changed: ' + str(path))
+                  expected_files.add(name + '/' + relative)
+          actual_files = {str(path.relative_to(distribution)) for path in distribution.rglob('*')
+                          if path.is_file()}
+          if actual_files != expected_files:
+              raise SystemExit('Unexpected native SDK dependency file inventory')
+          if any(path.is_symlink() for path in distribution.rglob('*')):
+              raise SystemExit('Unexpected native SDK dependency link')
+          configuration = distribution / '.cargo/sdk-patches.toml'
+          for entry in tomllib.loads(configuration.read_text())['patch']['crates-io'].values():
+              if Path(entry['path']).is_absolute():
+                  raise SystemExit('Native SDK patch path is not relocatable')
+              package = (configuration.parent.parent / entry['path']).resolve()
+              if not package.is_relative_to(distribution.resolve()) or not (package / 'Cargo.toml').is_file():
+                  raise SystemExit('Missing or external native SDK patch package')
+          archive = work / 'windows-arm32-rust-dependencies.tar.gz'
+          with tarfile.open(archive, 'w:gz') as output:
+              output.add(distribution, arcname='.')
+          archive.with_name(archive.name + '.sha256').write_text(
+              hashlib.sha256(archive.read_bytes()).hexdigest() + '  ' + archive.name + '\n')
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-arm32-rust-dependencies
+          path: |
+            _work/windows-arm32-rust-dependencies.tar.gz
+            _work/windows-arm32-rust-dependencies.tar.gz.sha256
+          if-no-files-found: error
+  rust:
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ['1.95.0', '1.93.1']
+    env:
+      RUSTUP_HOME: ${{ github.workspace }}/_work/rustup
+      CARGO_HOME: ${{ github.workspace }}/_work/cargo
+      TMPDIR: ${{ github.workspace }}/_work/tmp
+    steps:
+      - name: Prepare Ubuntu amd64 container dependencies
+        run: |
+          test "$(uname -m)" = x86_64
+          mkdir -p "$GITHUB_WORKSPACE/_work/tmp"
+          export TMPDIR="$GITHUB_WORKSPACE/_work/tmp"
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential clang cmake ninja-build \
+            git curl ca-certificates python3 python3-pip python3-venv pkg-config \
+            zip unzip xz-utils zstd patchelf libxml2-dev libzstd-dev zlib1g-dev \
+            libssl-dev liblzma-dev libcurl4-openssl-dev libncurses-dev gh
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust components in a private workspace
+        run: |
+          mkdir -p _work/tmp
+          curl --fail --location --retry 3 \
+            https://static.rust-lang.org/rustup/archive/1.28.2/x86_64-unknown-linux-gnu/rustup-init \
+            --output _work/rustup-init
+          echo '20a06e644b0d9bd2fbdbfd52d42540bdde820ea7df86e92e533c073da0cdd43c  _work/rustup-init' | sha256sum -c -
+          chmod +x _work/rustup-init
+          _work/rustup-init -y --no-modify-path --default-toolchain none
+          "$CARGO_HOME/bin/rustup" toolchain install '${{ matrix.version }}' \
+            --profile minimal --component rust-src --no-self-update
+          python3 dev/windows_arm32/toolchain/prepare_rust_distribution.py \
+            --rustc "$RUSTUP_HOME/toolchains/${{ matrix.version }}-x86_64-unknown-linux-gnu/bin/rustc" \
+            --version '${{ matrix.version }}' --output _work/rust
+      - name: Verify relocation and package complete Rust components
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import subprocess
+          import tarfile
+          from pathlib import Path
+          work = Path('_work').resolve()
+          distribution = work / 'rust'
+          report = json.loads((distribution / 'rust-distribution-provenance.json').read_text())
+          def verify():
+              files = {str(path.relative_to(distribution)) for path in distribution.rglob('*')
+                       if path.is_file()}
+              if files != set(report['files']) | {'rust-distribution-provenance.json'}:
+                  raise SystemExit('Unexpected Rust component file inventory')
+              if any(path.is_symlink() for path in distribution.rglob('*')):
+                  raise SystemExit('Unexpected Rust component link')
+              for name, expected in report['files'].items():
+                  if hashlib.sha256((distribution / name).read_bytes()).hexdigest() != expected:
+                      raise SystemExit('Rust component changed: ' + name)
+          verify()
+          relocated = work / 'relocated Rust tool'
+          distribution.rename(relocated)
+          try:
+              project = work / 'host-proof'
+              (project / 'src').mkdir(parents=True)
+              (project / 'Cargo.toml').write_text(
+                  '[package]\nname="rust_host_proof"\nversion="0.1.0"\nedition="2021"\n')
+              (project / 'src/main.rs').write_text(
+                  'fn main() { let v: Vec<i32> = (0..100).collect(); '
+                  'assert_eq!(v.iter().sum::<i32>(), 4950); '
+                  'assert_eq!("日本語".chars().count(), 3); }\n')
+              environment = dict(os.environ, RUSTC=str(relocated / 'bin/rustc'),
+                                 CARGO_HOME=str(work / 'proof-cargo'),
+                                 CARGO_TARGET_DIR=str(project / 'target'))
+              subprocess.run([str(relocated / 'bin/cargo'), 'build', '--offline'],
+                             cwd=project, env=environment, check=True)
+              subprocess.run([str(project / 'target/debug/rust_host_proof')], check=True)
+              subprocess.run([str(relocated / 'bin/rustdoc'), str(project / 'src/main.rs'),
+                              '-o', str(project / 'documentation')], env=environment, check=True)
+          finally:
+              relocated.rename(distribution)
+          verify()
+          archive = work / ('windows-arm32-rust-' + report['rustVersion'] + '-linux-x64.tar.gz')
+          with tarfile.open(archive, 'w:gz') as output:
+              output.add(distribution, arcname='.')
+          archive.with_name(archive.name + '.sha256').write_text(
+              hashlib.sha256(archive.read_bytes()).hexdigest() + '  ' + archive.name + '\n')
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-arm32-rust-${{ matrix.version }}-linux-x64
+          path: |
+            _work/windows-arm32-rust-*.tar.gz
+            _work/windows-arm32-rust-*.tar.gz.sha256
+          if-no-files-found: error
+  cppwinrt:
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    timeout-minutes: 60
+    steps:
+      - name: Prepare Ubuntu amd64 container dependencies
+        run: |
+          test "$(uname -m)" = x86_64
+          mkdir -p "$GITHUB_WORKSPACE/_work/tmp"
+          export TMPDIR="$GITHUB_WORKSPACE/_work/tmp"
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential clang cmake ninja-build \
+            git curl ca-certificates python3 python3-pip python3-venv pkg-config \
+            zip unzip xz-utils zstd patchelf libxml2-dev libzstd-dev zlib1g-dev \
+            libssl-dev liblzma-dev libcurl4-openssl-dev libncurses-dev gh
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Prepare generator build tools
+        run: |
+          mkdir -p _work/tmp
+          echo "TMPDIR=$GITHUB_WORKSPACE/_work/tmp" >> "$GITHUB_ENV"
+          cmake --version
+          ninja --version
+      - name: Build the pinned C++/WinRT generator and full SDK projection
+        run: |
+          python3 - <<'PY'
+          import subprocess
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, 'dev/windows_arm32/toolchain')
+          import prepare_cppwinrt
+          import prepare_windows_sdk
+          work = Path('_work').resolve()
+          source = work / 'cppwinrt-source.tar.gz'
+          subprocess.run(['curl', '--fail', '--location', '--retry', '3',
+                          prepare_cppwinrt.SOURCE_URL, '--output', str(source)], check=True)
+          if prepare_cppwinrt.sha(source) != prepare_cppwinrt.SOURCE_SHA256:
+              raise SystemExit('C++/WinRT source checksum mismatch')
+          sdk = work / 'windows-sdk'
+          prepare_windows_sdk.prepare(sdk)
+          package = sdk / 'downloads' / (
+              'windows-sdk-cpp-' + prepare_windows_sdk.SDK_VERSION + '.nupkg')
+          prepare_cppwinrt.prepare(source, package, work / 'cppwinrt', jobs=2)
+          PY
+      - name: Package generated headers, source records and licenses
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import tarfile
+          from pathlib import Path
+          work = Path('_work')
+          projection = work / 'cppwinrt/projection'
+          report = json.loads((projection / 'projection-provenance.json').read_text())
+          for name, expected in report['generatedFiles'].items():
+              if hashlib.sha256((projection / name).read_bytes()).hexdigest() != expected:
+                  raise SystemExit('Generated header or license changed: ' + name)
+          archive = work / 'windows-arm32-cppwinrt.tar.gz'
+          with tarfile.open(archive, 'w:gz') as output:
+              output.add(projection, arcname='.')
+          archive.with_name(archive.name + '.sha256').write_text(
+              hashlib.sha256(archive.read_bytes()).hexdigest() + '  ' + archive.name + '\n')
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-arm32-cppwinrt
+          path: |
+            _work/windows-arm32-cppwinrt.tar.gz
+            _work/windows-arm32-cppwinrt.tar.gz.sha256
+          if-no-files-found: error
+  msix:
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    timeout-minutes: 120
+    steps:
+      - name: Prepare Ubuntu amd64 container dependencies
+        run: |
+          test "$(uname -m)" = x86_64
+          mkdir -p "$GITHUB_WORKSPACE/_work/tmp"
+          export TMPDIR="$GITHUB_WORKSPACE/_work/tmp"
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential clang cmake ninja-build \
+            git curl ca-certificates python3 python3-pip python3-venv pkg-config \
+            zip unzip xz-utils zstd patchelf libxml2-dev libzstd-dev zlib1g-dev \
+            libssl-dev liblzma-dev libcurl4-openssl-dev libncurses-dev gh
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Prepare MSIX build tools
+        run: |
+          mkdir -p _work/tmp
+          echo "TMPDIR=$GITHUB_WORKSPACE/_work/tmp" >> "$GITHUB_ENV"
+          cmake --version
+          ninja --version
+      - name: Install the CMake version required by upstream MSIX
+        run: |
+          curl --fail --location --retry 3 \
+            https://github.com/Kitware/CMake/releases/download/v3.31.9/cmake-3.31.9-linux-x86_64.tar.gz \
+            --output _work/cmake.tar.gz
+          echo '312d78e0b7c5c9b4a97a87a46c3e525aa84895fe8135c238c4616bba73dc9518  _work/cmake.tar.gz' | sha256sum -c -
+          mkdir -p _work/cmake
+          tar -xzf _work/cmake.tar.gz --strip-components=1 -C _work/cmake
+          echo "$GITHUB_WORKSPACE/_work/cmake/bin" >> "$GITHUB_PATH"
+      - name: Build the full pinned MSIX packager
+        run: |
+          python3 dev/windows_arm32/toolchain/prepare_msix.py \
+            --output _work/msix --jobs 2
+      - name: Verify and package the portable MSIX tools
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import subprocess
+          import tarfile
+          from pathlib import Path
+          work = Path('_work')
+          distribution = work / 'msix/distribution'
+          report = json.loads((distribution / 'msix-provenance.json').read_text())
+          for name, expected in report['files'].items():
+              if hashlib.sha256((distribution / name).read_bytes()).hexdigest() != expected:
+                  raise SystemExit('MSIX tool or license changed: ' + name)
+          relocated = work / 'relocated MSIX tool'
+          distribution.rename(relocated)
+          subprocess.run([str(relocated / 'bin/makemsix'), '-?'], check=True)
+          relocated.rename(distribution)
+          archive = work / 'windows-arm32-msix-linux-x64.tar.gz'
+          with tarfile.open(archive, 'w:gz') as output:
+              output.add(distribution, arcname='.')
+          archive.with_name(archive.name + '.sha256').write_text(
+              hashlib.sha256(archive.read_bytes()).hexdigest() + '  ' + archive.name + '\n')
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-arm32-msix-linux-x64
+          path: |
+            _work/windows-arm32-msix-linux-x64.tar.gz
+            _work/windows-arm32-msix-linux-x64.tar.gz.sha256
+          if-no-files-found: error
+  python:
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    timeout-minutes: 30
+    steps:
+      - name: Prepare Ubuntu amd64 container dependencies
+        run: |
+          test "$(uname -m)" = x86_64
+          mkdir -p "$GITHUB_WORKSPACE/_work/tmp"
+          export TMPDIR="$GITHUB_WORKSPACE/_work/tmp"
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential clang cmake ninja-build \
+            git curl ca-certificates python3 python3-pip python3-venv pkg-config \
+            zip unzip xz-utils zstd patchelf libxml2-dev libzstd-dev zlib1g-dev \
+            libssl-dev liblzma-dev libcurl4-openssl-dev libncurses-dev gh
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Prepare Python archive tools
+        run: |
+          mkdir -p _work/tmp
+          echo "TMPDIR=$GITHUB_WORKSPACE/_work/tmp" >> "$GITHUB_ENV"
+          zstd --version
+      - name: Prepare checksum-pinned Python and Pillow without shared installs
+        run: |
+          python3 - <<'PY'
+          import subprocess
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, 'dev/windows_arm32/toolchain')
+          import prepare_python
+          work = Path('_work').resolve()
+          archive = work / 'python-full.tar.zst'
+          wheel = work / prepare_python.WHEEL_URL.rsplit('/', 1)[1]
+          for url, target in ((prepare_python.ARCHIVE_URL, archive),
+                              (prepare_python.WHEEL_URL, wheel)):
+              subprocess.run(['curl', '--fail', '--location', '--retry', '3',
+                              url, '--output', str(target)], check=True)
+          prepare_python.prepare(archive, wheel, work / 'python')
+          PY
+      - name: Check relocation and package Python with dependency licenses
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import subprocess
+          import tarfile
+          from pathlib import Path
+          work = Path('_work')
+          distribution = work / 'python'
+          report = json.loads((distribution / 'python-provenance.json').read_text())
+          def verify_distribution():
+              actual = {str(path.relative_to(distribution)) for path in distribution.rglob('*')
+                        if path.is_file() and not path.is_symlink()}
+              if actual != set(report['files']) | {'python-provenance.json'}:
+                  raise SystemExit('Unexpected Python distribution file inventory')
+              for path in distribution.rglob('*'):
+                  if path.is_symlink() and not path.resolve().is_relative_to(distribution.resolve()):
+                      raise SystemExit('External Python distribution link: ' + str(path))
+              for name, expected in report['files'].items():
+                  if hashlib.sha256((distribution / name).read_bytes()).hexdigest() != expected:
+                      raise SystemExit('Python dependency changed: ' + name)
+          verify_distribution()
+          relocated = work / 'relocated Python tool'
+          distribution.rename(relocated)
+          try:
+              subprocess.run([str(relocated / 'bin/python3.14'), '-I', '-B', '-c',
+                              'import ssl,sqlite3,ctypes,bz2,lzma,zlib,tkinter; import PIL; '
+                              'assert PIL.__version__ == "12.3.0"'], check=True)
+          finally:
+              relocated.rename(distribution)
+          verify_distribution()
+          archive = work / 'windows-arm32-python-linux-x64.tar.gz'
+          with tarfile.open(archive, 'w:gz') as output:
+              output.add(distribution, arcname='.')
+          archive.with_name(archive.name + '.sha256').write_text(
+              hashlib.sha256(archive.read_bytes()).hexdigest() + '  ' + archive.name + '\n')
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-arm32-python-linux-x64
+          path: |
+            _work/windows-arm32-python-linux-x64.tar.gz
+            _work/windows-arm32-python-linux-x64.tar.gz.sha256
+          if-no-files-found: error
+  engine:
+    needs: compiler
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [rt, phone]
+    env:
+      DEPOT_TOOLS_UPDATE: '0'
+      GIT_CONFIG_COUNT: '1'
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: ${{ github.workspace }}
+    steps:
+      - name: Prepare Ubuntu amd64 container dependencies
+        run: |
+          test "$(uname -m)" = x86_64
+          mkdir -p "$GITHUB_WORKSPACE/_work/tmp"
+          export TMPDIR="$GITHUB_WORKSPACE/_work/tmp"
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential clang cmake ninja-build \
+            git curl ca-certificates python3 python3-pip python3-venv pkg-config \
+            zip unzip xz-utils zstd patchelf libxml2-dev libzstd-dev zlib1g-dev \
+            libssl-dev liblzma-dev libcurl4-openssl-dev libncurses-dev gh
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Fetch pinned depot_tools from its upstream repository
+        run: |
+          git clone --filter=blob:none --no-checkout \
+            https://chromium.googlesource.com/chromium/tools/depot_tools.git _work/depot_tools
+          git -C _work/depot_tools checkout --detach b41883b1dc5a92bc7a53d69e27cfbfd320fd52ca
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: windows-arm32-compiler-linux-x64
+          path: _work/compiler-download
+      - name: Prepare workspace and build tools
+        run: |
+          mkdir -p _work/tmp _work/compiler
+          echo "TMPDIR=$GITHUB_WORKSPACE/_work/tmp" >> "$GITHUB_ENV"
+          echo "$GITHUB_WORKSPACE/_work/depot_tools" >> "$GITHUB_PATH"
+          cmake --version
+          ninja --version
+          cd _work/compiler-download
+          sha256sum --check windows-arm32-compiler-linux-x64.tar.gz.sha256
+          tar -xzf windows-arm32-compiler-linux-x64.tar.gz -C ../compiler
+          apt-get install -y --no-install-recommends libfreetype-dev
+      - name: Sync pinned engine dependencies without replacing the source checkout
+        run: python3 dev/windows_arm32/prepare_engine_checkout.py --windows-inputs
+      - name: Fetch pinned Windows GNU headers and libraries
+        run: |
+          archive=llvm-mingw-20251104-ucrt-ubuntu-22.04-x86_64.tar.xz
+          curl --fail --location --retry 3 \
+            "https://github.com/mstorsjo/llvm-mingw/releases/download/20251104/$archive" \
+            --output "_work/$archive"
+          echo "3aed6fa47be909884cb3e5634d6b7254604d7104832d6312f8435fb23d5a9bab  _work/$archive" \
+            | sha256sum --check
+          tar -xf "_work/$archive" -C _work
+      - name: Prepare Windows SDK headers
+        run: python3 dev/windows_arm32/toolchain/prepare_windows_sdk.py --output _work/windows-sdk --mingw-sysroot _work/llvm-mingw-20251104-ucrt-ubuntu-22.04-x86_64
+      - name: Configure the isolated source-built toolchain
+        run: |
+          python3 - <<'PY'
+          import json
+          import subprocess
+          from pathlib import Path
+          work = Path('_work').resolve()
+          resource = subprocess.check_output(
+              [str(work / 'compiler/bin/clang'), '-print-resource-dir'], text=True).strip()
+          configuration = {
+              'compiler': str(work / 'compiler/bin/clang'),
+              'llvmBin': str(work / 'compiler/bin'),
+              'sysroot': str(work / 'llvm-mingw-20251104-ucrt-ubuntu-22.04-x86_64'),
+              'resourceDir': resource,
+              'systemIncludeDirs': [str(work / 'windows-sdk/include'), str(work / 'atl/include')],
+              'runtimeResourceDir': str(work / 'llvm-mingw-20251104-ucrt-ubuntu-22.04-x86_64/lib/clang/21'),
+              'rtLibraryDirs': [str(work / 'atl/lib')],
+          }
+          (work / 'toolchain.json').write_text(json.dumps(configuration, indent=2) + '\n')
+          PY
+          python3 dev/windows_arm32/toolchain/prepare_atl.py --output _work/atl \
+            --sdk-include _work/windows-sdk/include --toolchain-config _work/toolchain.json
+      - name: Verify Boolean and Byte WinRT boxing interfaces and ABI
+        env:
+          FLUTTER_WINDOWS_ARM32_TOOLCHAIN_CONFIG: ${{ github.workspace }}/_work/toolchain.json
+        run: |
+          for mode in cc cxx; do
+            python3 dev/windows_arm32/toolchain/${{ matrix.platform }}_driver.py "$mode" \
+              -O2 -c dev/windows_arm32/toolchain/tests/winrt_foundation.cpp \
+              -o "_work/winrt-foundation-$mode.obj"
+          done
+      - name: Build engine, ANGLE and matching snapshot generator from source
+        env:
+          # Use the managed host Python, as in the validated source builds.
+          VPYTHON_BYPASS: manually managed python not supported by chrome operations
+        run: |
+          python3 dev/windows_arm32/build_engine.py --platform ${{ matrix.platform }} \
+            --output _work/engine --toolchain-config _work/toolchain.json --jobs 2 \
+            --compiler-platform --ninja /usr/bin/ninja
+      - name: Compile the matching frontend from the pinned Dart sources
+        run: |
+          python3 dev/windows_arm32/build_frontend.py \
+            --dart engine/src/flutter/prebuilts/linux-x64/dart-sdk/bin/dart \
+            --output _work/frontend
+      - name: Package the verified engine outputs
+        env:
+          ENGINE_FAMILY: ${{ matrix.platform }}
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import shutil
+          import tarfile
+          from pathlib import Path
+          family = os.environ['ENGINE_FAMILY']
+          work = Path('_work')
+          build = work / 'engine'
+          report = json.loads((build / 'engine-build-provenance.json').read_text())
+          directory = build / 'out' / ('win_release_arm_' + family)
+          stage = work / ('engine-distribution-' + family)
+          stage.mkdir()
+          for name, expected in report['families'][family]['artifacts'].items():
+              source = directory / name
+              if hashlib.sha256(source.read_bytes()).hexdigest() != expected['sha256']:
+                  raise SystemExit('Build output changed: ' + name)
+              target = stage / name
+              target.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(source, target)
+          shutil.copy2(build / 'engine-build-provenance.json', stage)
+          frontend_report = json.loads((work / 'frontend/frontend-source-provenance.json').read_text())
+          frontend = work / 'frontend/frontend_server_aot.dart.snapshot'
+          if hashlib.sha256(frontend.read_bytes()).hexdigest() != frontend_report['snapshotSha256']:
+              raise SystemExit('Frontend output changed')
+          shutil.copy2(frontend, stage)
+          shutil.copy2(work / 'frontend/frontend-source-provenance.json', stage)
+          shutil.copy2('LICENSE', stage / 'Flutter-LICENSE.txt')
+          shutil.copy2('engine/src/flutter/sky/packages/sky_engine/LICENSE',
+                       stage / 'Flutter-ThirdParty-LICENSE.txt')
+          shutil.copy2('dev/windows_arm32/toolchain/LLVM-LICENSE.txt',
+                       stage / 'LLVM-LICENSE.txt')
+          archive = work / ('windows-arm32-engine-' + family + '-linux-x64.tar.gz')
+          with tarfile.open(archive, 'w:gz') as output:
+              output.add(stage, arcname='.')
+          archive.with_name(archive.name + '.sha256').write_text(
+              hashlib.sha256(archive.read_bytes()).hexdigest() + '  ' + archive.name + '\n')
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-arm32-engine-${{ matrix.platform }}-linux-x64
+          path: |
+            _work/windows-arm32-engine-${{ matrix.platform }}-linux-x64.tar.gz
+            _work/windows-arm32-engine-${{ matrix.platform }}-linux-x64.tar.gz.sha256
+          if-no-files-found: error
+  sdk:
+    needs: [compiler, cppwinrt, msix, python, rust, rust_dependencies, combine]
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    timeout-minutes: 240
+    env:
+      CI: 'true'
+      TMPDIR: ${{ github.workspace }}/_work/tmp
+      PUB_CACHE: ${{ github.workspace }}/_work/pub-cache
+      XDG_CONFIG_HOME: ${{ github.workspace }}/_work/config
+      GIT_CONFIG_COUNT: '1'
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: ${{ github.workspace }}
+    steps:
+      - name: Prepare Ubuntu amd64 container dependencies
+        run: |
+          test "$(uname -m)" = x86_64
+          mkdir -p "$GITHUB_WORKSPACE/_work/tmp"
+          export TMPDIR="$GITHUB_WORKSPACE/_work/tmp"
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential clang cmake ninja-build \
+            git curl ca-certificates python3 python3-pip python3-venv pkg-config \
+            zip unzip xz-utils zstd patchelf libxml2-dev libzstd-dev zlib1g-dev \
+            libssl-dev liblzma-dev libcurl4-openssl-dev libncurses-dev gh
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: _work/sdk
+          persist-credentials: false
+          fetch-depth: 2
+          fetch-tags: true
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: localsend/localsend
+          ref: 5ccc6dea192d1c697c2602bf456b2eb2ad8e9674
+          path: _work/localsend
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: windows-arm32-*
+          path: _work/downloads
+      - name: Prepare host SDK build prerequisites
+        run: |
+          mkdir -p _work/tmp _work/source-inputs
+          cmake --version
+          ninja --version
+          test "$(git -C _work/sdk rev-parse '3.38.10^{commit}')" = c6f67dede3d4aa1aa7a69dd56a3494a5cde6cc80
+          test "$(git -C _work/sdk rev-list --count 3.38.10..HEAD)" = 1
+          _work/sdk/bin/flutter --version
+          _work/sdk/bin/flutter precache --linux --windows
+      - name: Install verified artifacts into the SDK
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import tarfile
+          from pathlib import Path
+          work = Path('_work').resolve()
+          dependencies = work / 'sdk/bin/cache/windows-arm32-dependencies'
+          artifacts = {
+              'windows-arm32-compiler-linux-x64': dependencies / 'compiler',
+              'windows-arm32-cppwinrt': dependencies / 'cppwinrt',
+              'windows-arm32-msix-linux-x64': dependencies / 'msix',
+              'windows-arm32-python-linux-x64': dependencies / 'python',
+              'windows-arm32-rust-1.95.0-linux-x64': dependencies / 'rust-1.95.0',
+              'windows-arm32-rust-1.93.1-linux-x64': dependencies / 'rust-1.93.1',
+              'windows-arm32-rust-dependencies': dependencies / 'rust-dependencies',
+              'windows-arm32-engines-linux-x64': work / 'engines',
+          }
+          for name, destination in artifacts.items():
+              archive = work / 'downloads' / name / (name + '.tar.gz')
+              expected = archive.with_name(archive.name + '.sha256').read_text().split()[0]
+              if hashlib.sha256(archive.read_bytes()).hexdigest() != expected:
+                  raise SystemExit('SDK input archive checksum failed: ' + name)
+              destination.mkdir(parents=True)
+              with tarfile.open(archive) as source:
+                  source.extractall(destination, filter='data')
+          PY
+      - name: Prepare Windows headers and ATL inside the SDK
+        run: |
+          python3 - <<'PY'
+          import json
+          import subprocess
+          import sys
+          from pathlib import Path
+          sdk = Path('_work/sdk').resolve()
+          sys.path.insert(0, str(sdk / 'dev/windows_arm32/toolchain'))
+          import prepare_atl
+          import prepare_windows_sdk
+          dependencies = sdk / 'bin/cache/windows-arm32-dependencies'
+          inputs = Path('_work/source-inputs').resolve()
+          gnu_archive = inputs / 'llvm-mingw-20251104-ucrt-ubuntu-22.04-x86_64.tar.xz'
+          subprocess.run(['curl', '--fail', '--location', '--retry', '3',
+              'https://github.com/mstorsjo/llvm-mingw/releases/download/20251104/' + gnu_archive.name,
+              '--output', str(gnu_archive)], check=True)
+          import hashlib
+          if hashlib.sha256(gnu_archive.read_bytes()).hexdigest() != '3aed6fa47be909884cb3e5634d6b7254604d7104832d6312f8435fb23d5a9bab':
+              raise SystemExit('Windows GNU SDK checksum failed')
+          subprocess.run(['tar', '-xf', str(gnu_archive), '-C', str(dependencies)], check=True)
+          windows_package = inputs / 'windows-sdk.nupkg'
+          subprocess.run(['curl', '--fail', '--location', '--retry', '3',
+                          prepare_windows_sdk.SDK_URL, '--output', str(windows_package)], check=True)
+          prepare_windows_sdk.prepare(dependencies / 'windows-sdk', windows_package,
+              dependencies / 'llvm-mingw-20251104-ucrt-ubuntu-22.04-x86_64')
+          for kind, (_, url) in prepare_atl.PACKAGES.items():
+              subprocess.run(['curl', '--fail', '--location', '--retry', '3',
+                              url, '--output', str(inputs / (kind + '.vsix'))], check=True)
+          compiler = dependencies / 'compiler'
+          resource = subprocess.check_output([str(compiler / 'bin/clang'), '-print-resource-dir'],
+                                             text=True).strip()
+          configuration = {
+              'compiler': str(compiler / 'bin/clang'), 'llvmBin': str(compiler / 'bin'),
+              'resourceDir': resource,
+              'sysroot': str(dependencies / 'llvm-mingw-20251104-ucrt-ubuntu-22.04-x86_64'),
+              'systemIncludeDirs': [str(dependencies / 'windows-sdk/include')],
+          }
+          config = inputs / 'atl-build.json'
+          config.write_text(json.dumps(configuration) + '\n')
+          subprocess.run([sys.executable, str(sdk / 'dev/windows_arm32/toolchain/prepare_atl.py'),
+              '--output', str(dependencies / 'atl'),
+              '--sdk-include', str(dependencies / 'windows-sdk/include'),
+              '--toolchain-config', str(config),
+              '--headers-package', str(inputs / 'headers.vsix'),
+              '--source-package', str(inputs / 'source.vsix')], check=True)
+          PY
+      - name: Configure contained dependencies and assemble both engine families
+        run: |
+          sdk="$GITHUB_WORKSPACE/_work/sdk"
+          dependencies="$sdk/bin/cache/windows-arm32-dependencies"
+          python3 "$sdk/dev/windows_arm32/configure_sdk_dependencies.py" \
+            --sdk "$sdk" --output "$dependencies/configuration" \
+            --compiler "$dependencies/compiler" \
+            --gnu-sysroot "$dependencies/llvm-mingw-20251104-ucrt-ubuntu-22.04-x86_64" \
+            --windows-sdk "$dependencies/windows-sdk" --atl "$dependencies/atl" \
+            --cppwinrt "$dependencies/cppwinrt" --python "$dependencies/python/bin/python3.14" \
+            --packager "$dependencies/msix/bin/makemsix" \
+            --rust-stable "$dependencies/rust-1.95.0" --rust-193 "$dependencies/rust-1.93.1" \
+            --rust-dependencies "$dependencies/rust-dependencies"
+          python3 "$sdk/dev/windows_arm32/assemble_sdk.py" \
+            --sdk "$sdk" --engine-build "$GITHUB_WORKSPACE/_work/engines" \
+            --frontend-server "$GITHUB_WORKSPACE/_work/engines/frontend/frontend_server_aot.dart.snapshot" \
+            --patched-sdk "$GITHUB_WORKSPACE/_work/engines/out/win_release_arm_rt/flutter_patched_sdk" \
+            --dependency-config "$dependencies/configuration/sdk-dependencies.json"
+      - name: Relocate SDK and build the unchanged LocalSend application
+        run: |
+          mv _work/sdk '_work/relocated Flutter SDK'
+          sdk="$GITHUB_WORKSPACE/_work/relocated Flutter SDK"
+          cd _work/localsend/app
+          "$sdk/bin/flutter" pub get --enforce-lockfile
+          "$sdk/bin/flutter" build windows --release --target-platform windows-arm --no-pub
+          "$sdk/bin/flutter" build windows --release --target-platform windows-arm --windows-family phone --no-pub
+          git diff --exit-code
+      - name: Record build validation and package the SDK
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import tarfile
+          from pathlib import Path
+          work = Path('_work')
+          sdk = work / 'relocated Flutter SDK'
+          report_path = sdk / 'bin/cache/artifacts/engine/windows-arm-release/sdk-assembly.json'
+          report = json.loads(report_path.read_text())
+          report.update(applicationBuildVerified=True, relocatedSdkBuildVerified=True,
+                        validationApplicationCommit='5ccc6dea192d1c697c2602bf456b2eb2ad8e9674',
+                        physicalValidationOfCiArtifactsPending=True, releaseReady=False)
+          report_path.write_text(json.dumps(report, indent=2) + '\n')
+          archive = work / 'flutter-windows-arm32-linux-x64.tar.gz'
+          def include(info):
+              path = Path(info.name)
+              if '.windows-arm32-cache' in path.parts:
+                  return None
+              return info
+          with tarfile.open(archive, 'w:gz') as output:
+              output.add(sdk, arcname='flutter', filter=include)
+          archive.with_name(archive.name + '.sha256').write_text(
+              hashlib.sha256(archive.read_bytes()).hexdigest() + '  ' + archive.name + '\n')
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: flutter-windows-arm32-linux-x64
+          path: |
+            _work/flutter-windows-arm32-linux-x64.tar.gz
+            _work/flutter-windows-arm32-linux-x64.tar.gz.sha256
+          if-no-files-found: error
+      - name: Build physical test fixtures with the isolated application bug fix
+        run: |
+          # The SDK was already validated against the unchanged application.
+          # This application-only fix is for transfer testing, never a SDK hook.
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import subprocess
+          from pathlib import Path
+          fixture = Path('.github/test-fixtures')
+          record = json.loads((fixture / 'localsend-send-session-id.json').read_text())
+          project = Path('_work/localsend')
+          patch = fixture / 'localsend-send-session-id.patch'
+          source = project / record['path']
+          assert hashlib.sha256(patch.read_bytes()).hexdigest() == record['patchSha256']
+          assert hashlib.sha256(source.read_bytes()).hexdigest() == record['originalSha256']
+          subprocess.run(['git', 'apply', str(patch.resolve())], cwd=project, check=True)
+          assert hashlib.sha256(source.read_bytes()).hexdigest() == record['patchedSha256']
+          assert subprocess.check_output(['git', 'diff', '--name-only'], cwd=project, text=True).strip() == record['path']
+          Path('_work/physical-application-source.json').write_text(json.dumps(record, indent=2) + '\n')
+          # Only this post-archive test copy uses the existing device test
+          # certificate's publisher. The public SDK retains its defaults.
+          config = Path('_work/relocated Flutter SDK/bin/cache/artifacts/engine/windows-arm-release/toolchain/phone-build.json')
+          values = json.loads(config.read_text())
+          values['packageDefaults']['publisher'] = 'CN=MacMobileDev'
+          config.write_text(json.dumps(values, indent=2) + '\n')
+          PY
+          sdk="$GITHUB_WORKSPACE/_work/relocated Flutter SDK"
+          cd _work/localsend/app
+          "$sdk/bin/flutter" build windows --release --target-platform windows-arm --build-number 80 --no-pub
+          "$sdk/bin/flutter" build windows --release --target-platform windows-arm --windows-family phone --build-number 80 --no-pub
+          cd "$GITHUB_WORKSPACE"
+          tar -czf _work/physical-rt.tar.gz -C _work/localsend/app/build/windows/arm runner
+          tar -czf _work/physical-phone.tar.gz -C _work/localsend/app/build/windows/arm-phone bundle localsend_app.unsigned.appx package-metadata.json
+          sha256sum _work/physical-rt.tar.gz _work/physical-phone.tar.gz > _work/physical-bundles.sha256
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-arm32-physical-test-bundles
+          path: |
+            _work/physical-rt.tar.gz
+            _work/physical-phone.tar.gz
+            _work/physical-bundles.sha256
+            _work/physical-application-source.json
+          if-no-files-found: error
+  combine:
+    needs: engine
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    steps:
+      - name: Prepare Ubuntu amd64 container dependencies
+        run: |
+          test "$(uname -m)" = x86_64
+          mkdir -p "$GITHUB_WORKSPACE/_work/tmp"
+          export TMPDIR="$GITHUB_WORKSPACE/_work/tmp"
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential clang cmake ninja-build \
+            git curl ca-certificates python3 python3-pip python3-venv pkg-config \
+            zip unzip xz-utils zstd patchelf libxml2-dev libzstd-dev zlib1g-dev \
+            libssl-dev liblzma-dev libcurl4-openssl-dev libncurses-dev gh
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: windows-arm32-engine-*-linux-x64
+          path: _work/downloads
+      - name: Verify and extract this run's engine archives
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import tarfile
+          from pathlib import Path
+          for family in ('rt', 'phone'):
+              name = 'windows-arm32-engine-' + family + '-linux-x64'
+              directory = Path('_work/downloads') / name
+              archive = directory / (name + '.tar.gz')
+              expected = archive.with_name(archive.name + '.sha256').read_text().split()[0]
+              if hashlib.sha256(archive.read_bytes()).hexdigest() != expected:
+                  raise SystemExit('Archive checksum failed: ' + family)
+              destination = Path('_work/extracted') / family
+              destination.mkdir(parents=True)
+              with tarfile.open(archive) as source:
+                  source.extractall(destination, filter='data')
+          PY
+      - name: Combine matching source-build outputs for SDK assembly
+        run: |
+          python3 dev/windows_arm32/merge_engine_artifacts.py \
+            --rt _work/extracted/rt --phone _work/extracted/phone \
+            --output _work/combined --host-cpu x64
+          tar -czf _work/windows-arm32-engines-linux-x64.tar.gz -C _work/combined .
+          cd _work
+          sha256sum windows-arm32-engines-linux-x64.tar.gz \
+            > windows-arm32-engines-linux-x64.tar.gz.sha256
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-arm32-engines-linux-x64
+          path: |
+            _work/windows-arm32-engines-linux-x64.tar.gz
+            _work/windows-arm32-engines-linux-x64.tar.gz.sha256
+          if-no-files-found: error

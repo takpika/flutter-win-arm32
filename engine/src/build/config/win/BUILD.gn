@@ -25,20 +25,37 @@ config("sdk") {
   if (target_os == "winuwp") {
     defines += [ "WINUWP" ]
   }
+  if (flutter_windows_phone) {
+    assert(target_cpu == "arm", "Windows Phone currently requires ARM32")
+    defines -= [ "NTDDI_VERSION=0x06030000", "PSAPI_VERSION=1" ]
+    defines += [
+      "NTDDI_VERSION=0x0A000000",
+      "PSAPI_VERSION=2",
+      "WINAPI_FAMILY=WINAPI_FAMILY_APP",
+      "WINUWP",
+      "FLUTTER_WINDOWS_PHONE=1",
+      "U_PLATFORM_HAS_WINUWP_API=1",
+    ]
+  }
 }
 
 # Sets the default Windows build version. This is separated because some
 # targets need to manually override it for their compiles.
 config("winver") {
-  defines = [
-    "_WIN32_WINNT=0x0603",
-    "WINVER=0x0603",
-  ]
+  if (flutter_windows_phone) {
+    defines = [ "_WIN32_WINNT=0x0A00", "WINVER=0x0A00" ]
+  } else {
+    defines = [ "_WIN32_WINNT=0x0603", "WINVER=0x0603" ]
+  }
 }
 
 # Linker flags for Windows SDK setup, this is applied only to EXEs and DLLs.
 config("sdk_link") {
-  if (current_cpu == "x64") {
+  if (flutter_windows_phone || flutter_windows_arm32_tool != "") {
+    # Sysroot and ARM runtime directories are supplied by the selected driver.
+    ldflags = []
+    lib_dirs = []
+  } else if (current_cpu == "x64") {
     ldflags = [ "/MACHINE:X64" ]
     lib_dirs = [
       "$windows_sdk_path\Lib\winv6.3\um\x64",
@@ -64,6 +81,13 @@ config("sdk_link") {
       "$windows_sdk_path\Lib\winv6.3\um\arm64",
       "$visual_studio_path\VC\lib\arm64",
       "$visual_studio_path\VC\atlmfc\lib\arm64",
+    ]
+  } else if (current_cpu == "arm") {
+    ldflags = [ "/MACHINE:ARM" ]
+    lib_dirs = [
+      "$windows_sdk_path\Lib\winv6.3\um\arm",
+      "$visual_studio_path\VC\lib\arm",
+      "$visual_studio_path\VC\atlmfc\lib\arm",
     ]
   } else {
     assert(false, "Unsupported CPU type")
@@ -93,20 +117,26 @@ config("common_linker_setup") {
   # typically changes with each launch. This in turn means that breakpoints in
   # Chrome.dll don't stick from one launch to the next. For this reason, we
   # turn ASLR off in debug builds.
-  # /DYNAMICBASE:NO isn't compatible with arm64.
-  if (is_debug && current_cpu != "arm64") {
+  if (flutter_windows_phone || flutter_windows_arm32_tool != "") {
+    ldflags += [ "/GUARD:CF" ]
+  }
+
+  # /DYNAMICBASE:NO isn't compatible with arm/arm64.
+  if (is_debug && current_cpu != "arm64" && current_cpu != "arm") {
     ldflags += [ "/DYNAMICBASE:NO" ]
   } else {
     ldflags += [ "/DYNAMICBASE" ]
   }
 
-  # Delay loaded DLLs.
+  # Desktop delayed imports do not belong in the Phone engine.
+  if (!flutter_windows_phone) {
   ldflags += [
     "/DELAYLOAD:dbghelp.dll",
     "/DELAYLOAD:dwmapi.dll",
     "/DELAYLOAD:shell32.dll",
     "/DELAYLOAD:uxtheme.dll",
   ]
+  }
 }
 
 # Subsystem --------------------------------------------------------------------
